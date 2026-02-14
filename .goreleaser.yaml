@@ -1,0 +1,56 @@
+version: 2
+
+project_name: rampart
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/rampart
+    binary: rampart
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+brews:
+  - repository:
+      owner: wdm0006
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/wdm0006/rampart"
+    description: "Audit and enforce GitHub branch protection rules across repos"
+    license: "MIT"
+    dependencies:
+      - name: gh
+    test: |
+      system "#{bin}/rampart", "--help"
+    install: |
+      bin.install "rampart"
