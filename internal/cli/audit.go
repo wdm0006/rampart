@@ -28,6 +28,7 @@ var auditCmd = &cobra.Command{
 		repo, _ := cmd.Flags().GetString("repo")
 		exclude, _ := cmd.Flags().GetStringSlice("exclude")
 		configPath, _ := cmd.Flags().GetString("config")
+		reportPath, _ := cmd.Flags().GetString("report")
 
 		if owner == "" {
 			// Default to current user
@@ -38,7 +39,7 @@ var auditCmd = &cobra.Command{
 			owner = user
 		}
 
-		results, _ := auditRepos(owner, repo, configPath, exclude)
+		results, cfg := auditRepos(owner, repo, configPath, exclude)
 
 		// Print results
 		nonCompliant := 0
@@ -78,6 +79,14 @@ var auditCmd = &cobra.Command{
 		fmt.Printf("Results: %d compliant, %d non-compliant, %d skipped out of %d repos\n",
 			compliant, nonCompliant, skipped, total)
 
+		if reportPath != "" {
+			data := newReportData(owner, configPath, cfg.Branch, results)
+			if err := generateReport(reportPath, data); err != nil {
+				exitWithError(err.Error())
+			}
+			fmt.Printf("\nReport written to %s\n", reportPath)
+		}
+
 		if nonCompliant > 0 {
 			os.Exit(1)
 		}
@@ -89,6 +98,7 @@ func init() {
 	auditCmd.Flags().String("repo", "", "Audit a single repo instead of all repos")
 	auditCmd.Flags().StringSlice("exclude", nil, "Repos to exclude (repeatable)")
 	auditCmd.Flags().String("config", "rampart.yaml", "Path to config file")
+	auditCmd.Flags().String("report", "", "Write an HTML report to the given file path")
 }
 
 // auditRepos is the shared audit engine used by both audit and apply commands

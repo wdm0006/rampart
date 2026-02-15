@@ -80,6 +80,7 @@ Options:
 - `--repo NAME` — audit a single repo
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
+- `--report FILE` — write a self-contained HTML report to the given path
 
 ### `rampart apply --owner NAME`
 
