@@ -12,6 +12,7 @@ import (
 // RepoAuditResult holds the audit result for a single repo
 type RepoAuditResult struct {
 	Repo      string
+	Branch    string
 	Compliant bool
 	Diffs     []config.RuleDiff
 	Error     string
@@ -99,7 +100,15 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 
 	var repos []github.Repo
 	if repo != "" {
-		repos = []github.Repo{{Name: repo}}
+		if cfg.Branch == "default" {
+			r, err := github.GetRepo(owner, repo)
+			if err != nil {
+				exitWithError(err.Error())
+			}
+			repos = []github.Repo{r}
+		} else {
+			repos = []github.Repo{{Name: repo}}
+		}
 	} else {
 		fmt.Printf("Fetching repos for %s...\n", owner)
 		repos, err = github.ListRepos(owner)
@@ -126,7 +135,12 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 			continue
 		}
 
-		actual, ok, err := github.GetBranchProtection(owner, r.Name, cfg.Branch)
+		branch := cfg.Branch
+		if branch == "default" {
+			branch = r.DefaultBranch
+		}
+
+		actual, ok, err := github.GetBranchProtection(owner, r.Name, branch)
 		if err != nil {
 			results = append(results, RepoAuditResult{
 				Repo:  r.Name,
@@ -154,6 +168,7 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 
 		results = append(results, RepoAuditResult{
 			Repo:      r.Name,
+			Branch:    branch,
 			Compliant: compliant,
 			Diffs:     diffs,
 		})

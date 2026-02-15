@@ -40,7 +40,7 @@ type RuleDiff struct {
 // Default returns a Config with sensible defaults
 func Default() Config {
 	return Config{
-		Branch: "main",
+		Branch: "default",
 		Rules: Rules{
 			RequirePullRequest:             true,
 			RequiredApprovals:              1,
@@ -71,7 +71,7 @@ func Load(path string) (Config, error) {
 	}
 
 	if cfg.Branch == "" {
-		cfg.Branch = "main"
+		cfg.Branch = "default"
 	}
 	if cfg.Rules.RequiredChecks == nil {
 		cfg.Rules.RequiredChecks = []string{}

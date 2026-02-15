@@ -55,7 +55,7 @@ var applyCmd = &cobra.Command{
 				}
 			} else {
 				fmt.Printf("  Updating %s...", r.Repo)
-				err := github.SetBranchProtection(owner, r.Repo, cfg.Branch, cfg.Rules)
+				err := github.SetBranchProtection(owner, r.Repo, r.Branch, cfg.Rules)
 				if err != nil {
 					fmt.Printf(" failed: %s\n", err)
 					failed++

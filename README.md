@@ -48,7 +48,7 @@ rampart apply --owner myuser
 `rampart.yaml` defines the branch and protection rules to enforce:
 
 ```yaml
-branch: main
+branch: default
 rules:
   require_pull_request: true
   required_approvals: 1
@@ -63,6 +63,8 @@ rules:
   required_linear_history: false
   required_conversation_resolution: false
 ```
+
+Setting `branch: default` resolves to each repo's actual default branch (e.g., `main` or `master`). You can also specify an exact branch name like `main` if preferred.
 
 ## Commands
 

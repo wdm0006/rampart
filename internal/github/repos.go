@@ -11,9 +11,10 @@ import (
 )
 
 type Repo struct {
-	Name     string `json:"name"`
-	Fork     bool   `json:"fork"`
-	Archived bool   `json:"archived"`
+	Name          string `json:"name"`
+	Fork          bool   `json:"fork"`
+	Archived      bool   `json:"archived"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 // GetCurrentUser returns the currently authenticated GitHub username
@@ -76,6 +77,25 @@ func listReposFromEndpoint(endpoint string) ([]Repo, error) {
 	}
 
 	return repos, nil
+}
+
+// GetRepo fetches a single repo's metadata
+func GetRepo(owner, name string) (Repo, error) {
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s", owner, name))
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return Repo{}, fmt.Errorf("gh api failed: %s", string(exitErr.Stderr))
+		}
+		return Repo{}, fmt.Errorf("failed to run gh: %w", err)
+	}
+
+	var repo Repo
+	if err := json.Unmarshal(output, &repo); err != nil {
+		return Repo{}, fmt.Errorf("failed to parse repo: %w", err)
+	}
+
+	return repo, nil
 }
 
 // GetBranchProtection gets the current branch protection rules for a repo.
