@@ -49,6 +49,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(applyCmd)
+	rootCmd.AddCommand(configCmd)
 }
 
 func exitWithError(msg string) {
