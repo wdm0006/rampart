@@ -162,6 +162,126 @@ overrides:
 	}
 }
 
+func TestNoProtectionRules(t *testing.T) {
+	r := NoProtectionRules()
+	if !r.AllowForcePushes {
+		t.Error("expected AllowForcePushes=true for no protection")
+	}
+	if !r.AllowDeletions {
+		t.Error("expected AllowDeletions=true for no protection")
+	}
+	if r.RequirePullRequest {
+		t.Error("expected RequirePullRequest=false for no protection")
+	}
+}
+
+func TestMergeProtective_BothEmpty(t *testing.T) {
+	a := NoProtectionRules()
+	b := NoProtectionRules()
+	m := MergeProtective(a, b)
+	if !m.AllowForcePushes {
+		t.Error("expected AllowForcePushes=true when neither source blocks")
+	}
+	if !m.AllowDeletions {
+		t.Error("expected AllowDeletions=true when neither source blocks")
+	}
+}
+
+func TestMergeProtective_ClassicOnly(t *testing.T) {
+	classic := Rules{
+		RequirePullRequest:  true,
+		RequiredApprovals:   1,
+		DismissStaleReviews: true,
+		EnforceAdmins:       true,
+		AllowForcePushes:    false,
+		AllowDeletions:      false,
+		RequiredChecks:      []string{"build"},
+	}
+	rulesets := NoProtectionRules()
+	m := MergeProtective(classic, rulesets)
+
+	if !m.RequirePullRequest {
+		t.Error("expected RequirePullRequest=true")
+	}
+	if m.RequiredApprovals != 1 {
+		t.Errorf("expected 1 approval, got %d", m.RequiredApprovals)
+	}
+	if m.AllowForcePushes {
+		t.Error("expected AllowForcePushes=false (classic blocks)")
+	}
+	if !m.EnforceAdmins {
+		t.Error("expected EnforceAdmins=true")
+	}
+}
+
+func TestMergeProtective_RulesetsOnly(t *testing.T) {
+	classic := NoProtectionRules()
+	rulesets := Rules{
+		RequirePullRequest:             true,
+		RequiredApprovals:              2,
+		RequireCodeOwnerReviews:        true,
+		AllowForcePushes:               false,
+		AllowDeletions:                 true,
+		RequiredConversationResolution: true,
+		RequiredChecks:                 []string{"test"},
+	}
+	m := MergeProtective(classic, rulesets)
+
+	if m.RequiredApprovals != 2 {
+		t.Errorf("expected 2 approvals, got %d", m.RequiredApprovals)
+	}
+	if m.AllowForcePushes {
+		t.Error("expected AllowForcePushes=false (rulesets block)")
+	}
+	if !m.AllowDeletions {
+		t.Error("expected AllowDeletions=true (neither blocks)")
+	}
+	if !m.RequiredConversationResolution {
+		t.Error("expected RequiredConversationResolution=true")
+	}
+}
+
+func TestMergeProtective_Combined(t *testing.T) {
+	classic := Rules{
+		RequirePullRequest: true,
+		RequiredApprovals:  1,
+		EnforceAdmins:      true,
+		AllowForcePushes:   true,
+		AllowDeletions:     false,
+		RequiredChecks:     []string{"build"},
+	}
+	rulesets := Rules{
+		RequirePullRequest:      true,
+		RequiredApprovals:       3,
+		RequireCodeOwnerReviews: true,
+		AllowForcePushes:        false,
+		AllowDeletions:          true,
+		RequiredChecks:          []string{"build", "lint"},
+	}
+	m := MergeProtective(classic, rulesets)
+
+	// Most restrictive wins
+	if m.RequiredApprovals != 3 {
+		t.Errorf("expected 3 approvals (max), got %d", m.RequiredApprovals)
+	}
+	if !m.RequireCodeOwnerReviews {
+		t.Error("expected RequireCodeOwnerReviews=true (from rulesets)")
+	}
+	if !m.EnforceAdmins {
+		t.Error("expected EnforceAdmins=true (from classic)")
+	}
+	if m.AllowForcePushes {
+		t.Error("expected AllowForcePushes=false (rulesets block)")
+	}
+	if m.AllowDeletions {
+		t.Error("expected AllowDeletions=false (classic blocks)")
+	}
+	// Union of checks
+	if len(m.RequiredChecks) != 2 {
+		t.Errorf("expected 2 checks (union), got %v", m.RequiredChecks)
+	}
+}
+
 func TestOverrideChecksSet(t *testing.T) {
 	content := `
 branch: default

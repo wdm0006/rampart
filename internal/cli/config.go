@@ -12,6 +12,11 @@ var configCmd = &cobra.Command{
 	Long: `Rampart is configured with a YAML file (default: rampart.yaml). Run
 'rampart init' to generate one with sensible defaults, then customize it.
 
+Rampart supports both classic branch protection and the newer GitHub
+rulesets API. During audit, both sources are checked and the most
+restrictive combination is used for comparison. During apply, rampart
+creates or updates a repository ruleset named "rampart".
+
 TOP-LEVEL OPTIONS
 =================
 
@@ -95,7 +100,9 @@ Other Rules
 enforce_admins (bool, default: true)
   Apply branch protection rules to repository administrators. When false,
   admins can bypass all protection rules including required reviews and
-  status checks.
+  status checks. In rulesets, this is implemented via bypass_actors:
+  enforce_admins=true means no bypass actors, enforce_admins=false adds
+  the admin repository role as a bypass actor.
 
 allow_force_pushes (bool, default: false)
   Allow force pushes to the protected branch. Force pushes rewrite

@@ -150,7 +150,8 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 			branch = r.DefaultBranch
 		}
 
-		actual, ok, err := github.GetBranchProtection(owner, r.Name, branch)
+		// Get classic branch protection rules
+		classicRules, ok, err := github.GetBranchProtection(owner, r.Name, branch)
 		if err != nil {
 			results = append(results, RepoAuditResult{
 				Repo:  r.Name,
@@ -166,6 +167,17 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 			})
 			continue
 		}
+
+		// Get ruleset-based rules
+		rulesetRules, err := github.GetBranchRules(owner, r.Name, branch)
+		if err != nil {
+			// Non-fatal: if rulesets endpoint fails, just use classic rules
+			rulesetRules = config.NoProtectionRules()
+		}
+
+		// Merge: the effective protection is the most restrictive
+		// combination of classic protection and rulesets
+		actual := config.MergeProtective(classicRules, rulesetRules)
 
 		effectiveRules := cfg.RulesForRepo(r.Name)
 		diffs := config.Compare(effectiveRules, actual, cfg.AllowStricterRules)

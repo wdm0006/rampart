@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0
+
+### Features
+
+- Add GitHub rulesets API support. Audit now checks both classic branch protection and rulesets, merging the most restrictive combination. Apply now creates or updates a repository ruleset named "rampart" instead of using the classic API. This supports repos that use the newer rulesets-based protection.
+
+### Bug Fixes
+
+- Fix `allow_force_pushes` and `allow_deletions` audit for unprotected repos. Previously, repos with no branch protection (404) incorrectly reported these fields as `false` instead of `true` (no protection means everything is allowed).
+
 ## v0.5.0
 
 ### Features

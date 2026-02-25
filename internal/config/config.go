@@ -67,6 +67,59 @@ type RuleDiff struct {
 	Got  string
 }
 
+// NoProtectionRules returns a Rules struct representing no protection from a
+// given source. Bool fields that mean "allowed" (force pushes, deletions) are
+// set to true since no protection means everything is allowed.
+func NoProtectionRules() Rules {
+	return Rules{
+		RequiredChecks:   []string{},
+		AllowForcePushes: true,
+		AllowDeletions:   true,
+	}
+}
+
+// MergeProtective merges two Rules by taking the most protective value for
+// each field. This represents the effective combined protection when both
+// classic branch protection and rulesets are active.
+func MergeProtective(a, b Rules) Rules {
+	checks := mergeStringSlice(a.RequiredChecks, b.RequiredChecks)
+
+	approvals := a.RequiredApprovals
+	if b.RequiredApprovals > approvals {
+		approvals = b.RequiredApprovals
+	}
+
+	return Rules{
+		RequirePullRequest:             a.RequirePullRequest || b.RequirePullRequest,
+		RequiredApprovals:              approvals,
+		DismissStaleReviews:            a.DismissStaleReviews || b.DismissStaleReviews,
+		RequireCodeOwnerReviews:        a.RequireCodeOwnerReviews || b.RequireCodeOwnerReviews,
+		RequireStatusChecks:            a.RequireStatusChecks || b.RequireStatusChecks,
+		StrictStatusChecks:             a.StrictStatusChecks || b.StrictStatusChecks,
+		RequiredChecks:                 checks,
+		EnforceAdmins:                  a.EnforceAdmins || b.EnforceAdmins,
+		AllowForcePushes:               a.AllowForcePushes && b.AllowForcePushes,
+		AllowDeletions:                 a.AllowDeletions && b.AllowDeletions,
+		RequiredLinearHistory:          a.RequiredLinearHistory || b.RequiredLinearHistory,
+		RequiredConversationResolution: a.RequiredConversationResolution || b.RequiredConversationResolution,
+	}
+}
+
+func mergeStringSlice(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	for _, s := range a {
+		seen[s] = true
+	}
+	for _, s := range b {
+		seen[s] = true
+	}
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result
+}
+
 // Default returns a Config with sensible defaults
 func Default() Config {
 	return Config{

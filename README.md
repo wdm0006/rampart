@@ -123,9 +123,12 @@ Options:
 
 1. Reads your `rampart.yaml` config
 2. Lists all non-fork, non-archived repos for the owner
-3. Fetches current branch protection for each repo
-4. Compares actual rules against desired rules
-5. Reports compliance (audit) or applies fixes (apply)
+3. Fetches current branch protection from both classic protection and rulesets
+4. Merges them (most restrictive combination wins)
+5. Compares effective rules against desired config
+6. Reports compliance (audit) or applies fixes via rulesets (apply)
+
+Rampart supports both **classic branch protection** and the newer **GitHub rulesets API**. During audit, both sources are checked. During apply, rampart creates or updates a repository ruleset named "rampart".
 
 All GitHub API calls go through the `gh` CLI, so authentication is handled by your existing `gh auth` session.
 

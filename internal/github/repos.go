@@ -136,7 +136,7 @@ func GetBranchProtection(owner, repo, branch string) (config.Rules, bool, error)
 			// 404 = no protection configured
 			if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
 				strings.Contains(stderr, "Branch not protected") {
-				return config.Rules{RequiredChecks: []string{}}, true, nil
+				return config.NoProtectionRules(), true, nil
 			}
 			// 403 = no permission
 			if strings.Contains(stderr, "403") || strings.Contains(stderr, "Must have admin") {
