@@ -40,14 +40,25 @@ func GetCurrentUser() (string, error) {
 
 // ListRepos lists non-fork, non-archived repos for an owner (user or org)
 func ListRepos(owner string) ([]Repo, error) {
-	// Try user repos first
-	repos, err := listReposFromEndpoint(fmt.Sprintf("users/%s/repos?type=owner&per_page=100", owner))
+	// Determine whether the owner is a user or organization so we use the
+	// correct endpoint. The users/{owner}/repos endpoint returns 200 for
+	// orgs but only lists public repos and ignores the type=owner filter,
+	// so we must explicitly use the orgs/ endpoint for organizations.
+	ownerType, err := getOwnerType(owner)
 	if err != nil {
-		// Fall back to org repos
-		repos, err = listReposFromEndpoint(fmt.Sprintf("orgs/%s/repos?per_page=100", owner))
-		if err != nil {
-			return nil, fmt.Errorf("failed to list repos for %s: %w", owner, err)
-		}
+		return nil, fmt.Errorf("failed to look up owner %s: %w", owner, err)
+	}
+
+	var endpoint string
+	if ownerType == "Organization" {
+		endpoint = fmt.Sprintf("orgs/%s/repos?per_page=100", owner)
+	} else {
+		endpoint = fmt.Sprintf("users/%s/repos?type=owner&per_page=100", owner)
+	}
+
+	repos, err := listReposFromEndpoint(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list repos for %s: %w", owner, err)
 	}
 
 	// Filter out forks and archived repos
@@ -59,6 +70,20 @@ func ListRepos(owner string) ([]Repo, error) {
 	}
 
 	return filtered, nil
+}
+
+// getOwnerType returns the GitHub account type ("User" or "Organization")
+// for the given owner name.
+func getOwnerType(owner string) (string, error) {
+	cmd := exec.Command("gh", "api", fmt.Sprintf("users/%s", owner), "--jq", ".type")
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("gh api failed: %s", string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("failed to run gh: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func listReposFromEndpoint(endpoint string) ([]Repo, error) {

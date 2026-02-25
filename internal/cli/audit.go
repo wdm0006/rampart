@@ -167,7 +167,7 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 			continue
 		}
 
-		diffs := config.Compare(cfg.Rules, actual)
+		diffs := config.Compare(cfg.Rules, actual, cfg.AllowStricterRules)
 		compliant := true
 		for _, d := range diffs {
 			if !d.Pass {

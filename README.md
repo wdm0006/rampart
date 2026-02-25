@@ -49,6 +49,7 @@ rampart apply --owner myuser
 
 ```yaml
 branch: default
+allow_stricter_rules: false
 rules:
   require_pull_request: true
   required_approvals: 1
@@ -65,6 +66,8 @@ rules:
 ```
 
 Setting `branch: default` resolves to each repo's actual default branch (e.g., `main` or `master`). You can also specify an exact branch name like `main` if preferred.
+
+Setting `allow_stricter_rules: true` treats repos as compliant when their protection is stricter than your config. For example, if you require 1 approval but a repo requires 2, it passes. This applies directionally per rule — more approvals, extra required checks, and disabling force pushes are all considered "stricter".
 
 ## Commands
 

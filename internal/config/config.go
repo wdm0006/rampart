@@ -9,8 +9,9 @@ import (
 
 // Config represents the rampart configuration file
 type Config struct {
-	Branch string `yaml:"branch"`
-	Rules  Rules  `yaml:"rules"`
+	Branch            string `yaml:"branch"`
+	AllowStricterRules bool   `yaml:"allow_stricter_rules"`
+	Rules             Rules  `yaml:"rules"`
 }
 
 // Rules represents the desired branch protection rules
@@ -191,58 +192,79 @@ func RulesFromResponse(resp ProtectionResponse) Rules {
 	return r
 }
 
-// Compare compares desired rules against actual rules and returns diffs
-func Compare(desired, actual Rules) []RuleDiff {
+// Compare compares desired rules against actual rules and returns diffs.
+// When allowStricter is true, a repo that exceeds the minimum config
+// (e.g. more required approvals, extra protections enabled) is treated as passing.
+func Compare(desired, actual Rules, allowStricter bool) []RuleDiff {
 	var diffs []RuleDiff
 
 	addDiff := func(rule string, pass bool, want, got string) {
 		diffs = append(diffs, RuleDiff{Rule: rule, Pass: pass, Want: want, Got: got})
 	}
 
-	addBoolDiff := func(rule string, want, got bool) {
-		addDiff(rule, want == got, fmt.Sprintf("%t", want), fmt.Sprintf("%t", got))
+	// For bool rules where true is "stricter" (more protective):
+	// pass if equal, or if allowStricter and actual is true while desired is false.
+	addStricterBoolDiff := func(rule string, want, got bool) {
+		pass := want == got || (allowStricter && got && !want)
+		addDiff(rule, pass, fmt.Sprintf("%t", want), fmt.Sprintf("%t", got))
+	}
+
+	// For bool rules where false is "stricter" (more protective), i.e. allow_* rules:
+	// pass if equal, or if allowStricter and actual is false while desired is true.
+	addLooserBoolDiff := func(rule string, want, got bool) {
+		pass := want == got || (allowStricter && !got && want)
+		addDiff(rule, pass, fmt.Sprintf("%t", want), fmt.Sprintf("%t", got))
 	}
 
 	// Pull request reviews
-	addBoolDiff("require_pull_request", desired.RequirePullRequest, actual.RequirePullRequest)
+	addStricterBoolDiff("require_pull_request", desired.RequirePullRequest, actual.RequirePullRequest)
 	if desired.RequirePullRequest {
-		approvalPass := desired.RequiredApprovals == actual.RequiredApprovals
+		approvalPass := desired.RequiredApprovals == actual.RequiredApprovals ||
+			(allowStricter && actual.RequiredApprovals > desired.RequiredApprovals)
 		addDiff("required_approvals", approvalPass,
 			fmt.Sprintf("%d", desired.RequiredApprovals),
 			fmt.Sprintf("%d", actual.RequiredApprovals))
-		addBoolDiff("dismiss_stale_reviews", desired.DismissStaleReviews, actual.DismissStaleReviews)
-		addBoolDiff("require_code_owner_reviews", desired.RequireCodeOwnerReviews, actual.RequireCodeOwnerReviews)
+		addStricterBoolDiff("dismiss_stale_reviews", desired.DismissStaleReviews, actual.DismissStaleReviews)
+		addStricterBoolDiff("require_code_owner_reviews", desired.RequireCodeOwnerReviews, actual.RequireCodeOwnerReviews)
 	}
 
 	// Status checks
-	addBoolDiff("require_status_checks", desired.RequireStatusChecks, actual.RequireStatusChecks)
+	addStricterBoolDiff("require_status_checks", desired.RequireStatusChecks, actual.RequireStatusChecks)
 	if desired.RequireStatusChecks {
-		addBoolDiff("strict_status_checks", desired.StrictStatusChecks, actual.StrictStatusChecks)
-		// Compare required checks
-		checksMatch := len(desired.RequiredChecks) == len(actual.RequiredChecks)
-		if checksMatch {
-			desiredSet := make(map[string]bool)
-			for _, c := range desired.RequiredChecks {
-				desiredSet[c] = true
-			}
-			for _, c := range actual.RequiredChecks {
-				if !desiredSet[c] {
-					checksMatch = false
+		addStricterBoolDiff("strict_status_checks", desired.StrictStatusChecks, actual.StrictStatusChecks)
+		// Compare required checks: actual must contain all desired checks.
+		// With allowStricter, actual may contain additional checks beyond desired.
+		allDesiredPresent := true
+		for _, c := range desired.RequiredChecks {
+			found := false
+			for _, ac := range actual.RequiredChecks {
+				if ac == c {
+					found = true
 					break
 				}
 			}
+			if !found {
+				allDesiredPresent = false
+				break
+			}
 		}
-		addDiff("required_checks", checksMatch,
+		var checksPass bool
+		if allowStricter {
+			checksPass = allDesiredPresent
+		} else {
+			checksPass = allDesiredPresent && len(desired.RequiredChecks) == len(actual.RequiredChecks)
+		}
+		addDiff("required_checks", checksPass,
 			fmt.Sprintf("%v", desired.RequiredChecks),
 			fmt.Sprintf("%v", actual.RequiredChecks))
 	}
 
 	// Other rules
-	addBoolDiff("enforce_admins", desired.EnforceAdmins, actual.EnforceAdmins)
-	addBoolDiff("allow_force_pushes", desired.AllowForcePushes, actual.AllowForcePushes)
-	addBoolDiff("allow_deletions", desired.AllowDeletions, actual.AllowDeletions)
-	addBoolDiff("required_linear_history", desired.RequiredLinearHistory, actual.RequiredLinearHistory)
-	addBoolDiff("required_conversation_resolution", desired.RequiredConversationResolution, actual.RequiredConversationResolution)
+	addStricterBoolDiff("enforce_admins", desired.EnforceAdmins, actual.EnforceAdmins)
+	addLooserBoolDiff("allow_force_pushes", desired.AllowForcePushes, actual.AllowForcePushes)
+	addLooserBoolDiff("allow_deletions", desired.AllowDeletions, actual.AllowDeletions)
+	addStricterBoolDiff("required_linear_history", desired.RequiredLinearHistory, actual.RequiredLinearHistory)
+	addStricterBoolDiff("required_conversation_resolution", desired.RequiredConversationResolution, actual.RequiredConversationResolution)
 
 	return diffs
 }
