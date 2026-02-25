@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/wdm0006/rampart/internal/config"
 	"github.com/wdm0006/rampart/internal/github"
 )
 
@@ -28,11 +29,18 @@ var applyCmd = &cobra.Command{
 
 		results, cfg := auditRepos(owner, repo, configPath, exclude)
 
-		// Find non-compliant repos
-		var toUpdate []RepoAuditResult
+		// Find non-compliant repos and resolve their effective rules
+		type repoUpdate struct {
+			RepoAuditResult
+			EffectiveRules config.Rules
+		}
+		var toUpdate []repoUpdate
 		for _, r := range results {
 			if !r.Compliant && !r.Skipped && r.Error == "" {
-				toUpdate = append(toUpdate, r)
+				toUpdate = append(toUpdate, repoUpdate{
+					RepoAuditResult: r,
+					EffectiveRules:  cfg.RulesForRepo(r.Repo),
+				})
 			}
 		}
 
@@ -55,7 +63,7 @@ var applyCmd = &cobra.Command{
 				}
 			} else {
 				fmt.Printf("  Updating %s...", r.Repo)
-				err := github.SetBranchProtection(owner, r.Repo, r.Branch, cfg.Rules)
+				err := github.SetBranchProtection(owner, r.Repo, r.Branch, r.EffectiveRules)
 				if err != nil {
 					fmt.Printf(" failed: %s\n", err)
 					failed++

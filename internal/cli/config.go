@@ -114,6 +114,36 @@ required_conversation_resolution (bool, default: false)
   Require all review conversations on a pull request to be resolved
   before merging. This ensures all feedback has been addressed.
 
+OVERRIDES
+=========
+
+overrides (list, default: none)
+  Per-repo rule overrides. Each entry has a list of repo name patterns
+  and a sparse set of rules that override the base config for matching
+  repos. Only the fields you specify are overridden; everything else
+  is inherited from the base rules.
+
+  Patterns support exact names and shell-style globs:
+    - "my-repo"          exact match
+    - "prod-*"           prefix wildcard
+    - "*-critical"       suffix wildcard
+    - "svc-??-prod"      single-character wildcards
+
+  If multiple overrides match a repo, they are applied in order (later
+  entries win for overlapping fields).
+
+  Overrides affect both audit (comparison) and apply (what gets written).
+
+  Example:
+    overrides:
+      - repos: ["prod-*", "infra-*"]
+        rules:
+          required_approvals: 2
+          enforce_admins: true
+      - repos: ["docs-site"]
+        rules:
+          require_pull_request: false
+
 EXAMPLE CONFIG
 ==============
 
@@ -121,9 +151,9 @@ EXAMPLE CONFIG
   allow_stricter_rules: true
   rules:
     require_pull_request: true
-    required_approvals: 2
+    required_approvals: 1
     dismiss_stale_reviews: true
-    require_code_owner_reviews: true
+    require_code_owner_reviews: false
     require_status_checks: true
     strict_status_checks: true
     required_checks:
@@ -133,7 +163,15 @@ EXAMPLE CONFIG
     allow_force_pushes: false
     allow_deletions: false
     required_linear_history: false
-    required_conversation_resolution: false`,
+    required_conversation_resolution: false
+  overrides:
+    - repos: ["prod-*", "infra-*"]
+      rules:
+        required_approvals: 2
+        require_code_owner_reviews: true
+    - repos: ["docs-site"]
+      rules:
+        require_pull_request: false`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.Long)
 	},

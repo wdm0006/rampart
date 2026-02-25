@@ -3,15 +3,44 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the rampart configuration file
 type Config struct {
-	Branch             string `yaml:"branch"`
-	AllowStricterRules bool   `yaml:"allow_stricter_rules"`
-	Rules              Rules  `yaml:"rules"`
+	Branch             string     `yaml:"branch"`
+	AllowStricterRules bool       `yaml:"allow_stricter_rules"`
+	Rules              Rules      `yaml:"rules"`
+	Overrides          []Override `yaml:"overrides"`
+}
+
+// Override defines rule overrides for repos matching the given patterns.
+// Patterns support exact names and globs (e.g. "prod-*", "*-critical").
+type Override struct {
+	Repos []string      `yaml:"repos"`
+	Rules OverrideRules `yaml:"rules"`
+}
+
+// OverrideRules is a sparse version of Rules where all fields are pointers.
+// Only non-nil fields override the base config.
+type OverrideRules struct {
+	RequirePullRequest             *bool    `yaml:"require_pull_request"`
+	RequiredApprovals              *int     `yaml:"required_approvals"`
+	DismissStaleReviews            *bool    `yaml:"dismiss_stale_reviews"`
+	RequireCodeOwnerReviews        *bool    `yaml:"require_code_owner_reviews"`
+	RequireStatusChecks            *bool    `yaml:"require_status_checks"`
+	StrictStatusChecks             *bool    `yaml:"strict_status_checks"`
+	RequiredChecks                 []string `yaml:"required_checks"`
+	EnforceAdmins                  *bool    `yaml:"enforce_admins"`
+	AllowForcePushes               *bool    `yaml:"allow_force_pushes"`
+	AllowDeletions                 *bool    `yaml:"allow_deletions"`
+	RequiredLinearHistory          *bool    `yaml:"required_linear_history"`
+	RequiredConversationResolution *bool    `yaml:"required_conversation_resolution"`
+	// checksSet tracks whether required_checks was explicitly set in YAML
+	// (to distinguish [] from not specified)
+	checksSet bool
 }
 
 // Rules represents the desired branch protection rules
@@ -59,9 +88,33 @@ func Default() Config {
 	}
 }
 
+// UnmarshalYAML implements custom unmarshaling for OverrideRules to detect
+// whether required_checks was explicitly set (distinguishing [] from absent).
+func (o *OverrideRules) UnmarshalYAML(value *yaml.Node) error {
+	// Use a shadow type to avoid infinite recursion
+	type shadow OverrideRules
+	var s shadow
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	*o = OverrideRules(s)
+
+	// Check if required_checks key is present in the YAML node
+	for i := 0; i < len(value.Content)-1; i += 2 {
+		if value.Content[i].Value == "required_checks" {
+			o.checksSet = true
+			if o.RequiredChecks == nil {
+				o.RequiredChecks = []string{}
+			}
+			break
+		}
+	}
+	return nil
+}
+
 // Load reads and parses a rampart config file
-func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+func Load(configPath string) (Config, error) {
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return Config{}, fmt.Errorf("failed to read config: %w", err)
 	}
@@ -79,6 +132,69 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// RulesForRepo returns the effective rules for a given repo name by starting
+// with the base rules and applying any matching overrides in order.
+func (c Config) RulesForRepo(repoName string) Rules {
+	rules := c.Rules
+	for _, o := range c.Overrides {
+		if o.matchesRepo(repoName) {
+			rules = mergeOverride(rules, o.Rules)
+		}
+	}
+	return rules
+}
+
+// matchesRepo returns true if the repo name matches any of the override's patterns.
+func (o Override) matchesRepo(repoName string) bool {
+	for _, pattern := range o.Repos {
+		if matched, err := path.Match(pattern, repoName); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeOverride applies non-nil override fields on top of base rules.
+func mergeOverride(base Rules, o OverrideRules) Rules {
+	if o.RequirePullRequest != nil {
+		base.RequirePullRequest = *o.RequirePullRequest
+	}
+	if o.RequiredApprovals != nil {
+		base.RequiredApprovals = *o.RequiredApprovals
+	}
+	if o.DismissStaleReviews != nil {
+		base.DismissStaleReviews = *o.DismissStaleReviews
+	}
+	if o.RequireCodeOwnerReviews != nil {
+		base.RequireCodeOwnerReviews = *o.RequireCodeOwnerReviews
+	}
+	if o.RequireStatusChecks != nil {
+		base.RequireStatusChecks = *o.RequireStatusChecks
+	}
+	if o.StrictStatusChecks != nil {
+		base.StrictStatusChecks = *o.StrictStatusChecks
+	}
+	if o.checksSet {
+		base.RequiredChecks = o.RequiredChecks
+	}
+	if o.EnforceAdmins != nil {
+		base.EnforceAdmins = *o.EnforceAdmins
+	}
+	if o.AllowForcePushes != nil {
+		base.AllowForcePushes = *o.AllowForcePushes
+	}
+	if o.AllowDeletions != nil {
+		base.AllowDeletions = *o.AllowDeletions
+	}
+	if o.RequiredLinearHistory != nil {
+		base.RequiredLinearHistory = *o.RequiredLinearHistory
+	}
+	if o.RequiredConversationResolution != nil {
+		base.RequiredConversationResolution = *o.RequiredConversationResolution
+	}
+	return base
 }
 
 // WriteDefault writes the default config to a file

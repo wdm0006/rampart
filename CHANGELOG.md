@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0
+
+### Features
+
+- Add per-repo rule overrides with glob pattern support. Use the `overrides` section in `rampart.yaml` to apply different rules to repos matching patterns like `prod-*` or `infra-*`. Only specified fields are overridden; everything else inherits from the base config. Overrides work with both `audit` and `apply`.
+- Update `rampart config` help to document the new overrides section.
+
 ## v0.4.1
 
 ### Features

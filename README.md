@@ -69,6 +69,26 @@ Setting `branch: default` resolves to each repo's actual default branch (e.g., `
 
 Setting `allow_stricter_rules: true` treats repos as compliant when their protection is stricter than your config. For example, if you require 1 approval but a repo requires 2, it passes. This applies directionally per rule — more approvals, extra required checks, and disabling force pushes are all considered "stricter".
 
+### Per-repo overrides
+
+Use `overrides` to apply different rules to specific repos. Patterns support exact names and globs (`*`, `?`). Only specified fields are overridden; everything else inherits from the base rules. Overrides are applied in order, so later entries win for overlapping fields.
+
+```yaml
+rules:
+  required_approvals: 1
+  # ... base rules
+overrides:
+  - repos: ["prod-*", "infra-*"]
+    rules:
+      required_approvals: 2
+      require_code_owner_reviews: true
+  - repos: ["docs-site"]
+    rules:
+      require_pull_request: false
+```
+
+Run `rampart config` for detailed documentation of all configuration options.
+
 ## Commands
 
 ### `rampart init`
@@ -84,6 +104,10 @@ Options:
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
 - `--report FILE` — write a self-contained HTML report to the given path
+
+### `rampart config`
+
+Show detailed documentation for all `rampart.yaml` configuration options.
 
 ### `rampart apply --owner NAME`
 
