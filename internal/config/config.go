@@ -9,9 +9,9 @@ import (
 
 // Config represents the rampart configuration file
 type Config struct {
-	Branch            string `yaml:"branch"`
+	Branch             string `yaml:"branch"`
 	AllowStricterRules bool   `yaml:"allow_stricter_rules"`
-	Rules             Rules  `yaml:"rules"`
+	Rules              Rules  `yaml:"rules"`
 }
 
 // Rules represents the desired branch protection rules
