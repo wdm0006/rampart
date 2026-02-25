@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1
+
+### Features
+
+- Add `rampart config` command that displays a detailed reference for all `rampart.yaml` configuration options, including types, defaults, descriptions, and an example config.
+
 ## v0.4.0
 
 ### Bug Fixes
