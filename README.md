@@ -63,6 +63,11 @@ rules:
   allow_deletions: false
   required_linear_history: false
   required_conversation_resolution: false
+  # Optional push allowlist — only the listed actors can push directly.
+  # restrictions:
+  #   users: [wdm0006]
+  #   teams: []
+  #   apps:  [renovate]
 ```
 
 Setting `branch: default` resolves to each repo's actual default branch (e.g., `main` or `master`). You can also specify an exact branch name like `main` if preferred.

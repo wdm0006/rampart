@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -336,4 +339,316 @@ overrides:
 	if len(rules.RequiredChecks) != 2 {
 		t.Errorf("expected 2 checks (inherited) for inherit-app, got %v", rules.RequiredChecks)
 	}
+}
+
+func TestRestrictions_LoadAndOverride(t *testing.T) {
+	content := `
+branch: default
+rules:
+  require_pull_request: true
+  required_approvals: 0
+  restrictions:
+    users: [wdm0006]
+    teams: []
+    apps: [renovate]
+overrides:
+  - repos: ["public-*"]
+    rules:
+      restrictions:
+        users: []
+        teams: []
+        apps: [dependabot]
+  - repos: ["unrestricted-*"]
+    rules:
+      restrictions: null
+  - repos: ["inherit-*"]
+    rules:
+      required_approvals: 2
+`
+	tmpFile, err := os.CreateTemp("", "rampart-test-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	tmpFile.Close()
+
+	cfg, err := Load(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Base rules have restrictions
+	if cfg.Rules.Restrictions == nil {
+		t.Fatal("expected base restrictions to be set")
+	}
+	if !reflect.DeepEqual(cfg.Rules.Restrictions.Users, []string{"wdm0006"}) {
+		t.Errorf("expected base users=[wdm0006], got %v", cfg.Rules.Restrictions.Users)
+	}
+	if !reflect.DeepEqual(cfg.Rules.Restrictions.Apps, []string{"renovate"}) {
+		t.Errorf("expected base apps=[renovate], got %v", cfg.Rules.Restrictions.Apps)
+	}
+
+	// Override fully replaces (does not merge)
+	rules := cfg.RulesForRepo("public-site")
+	if rules.Restrictions == nil {
+		t.Fatal("expected restrictions on public-site")
+	}
+	if len(rules.Restrictions.Users) != 0 {
+		t.Errorf("expected users=[] for public-site, got %v", rules.Restrictions.Users)
+	}
+	if !reflect.DeepEqual(rules.Restrictions.Apps, []string{"dependabot"}) {
+		t.Errorf("expected apps=[dependabot] for public-site, got %v", rules.Restrictions.Apps)
+	}
+
+	// Explicit null clears the allowlist
+	rules = cfg.RulesForRepo("unrestricted-app")
+	if rules.Restrictions != nil {
+		t.Errorf("expected restrictions=nil for unrestricted-app, got %+v", rules.Restrictions)
+	}
+
+	// Override without restrictions inherits base
+	rules = cfg.RulesForRepo("inherit-app")
+	if rules.Restrictions == nil {
+		t.Fatal("expected restrictions inherited for inherit-app")
+	}
+	if !reflect.DeepEqual(rules.Restrictions.Users, []string{"wdm0006"}) {
+		t.Errorf("expected inherited users=[wdm0006] for inherit-app, got %v", rules.Restrictions.Users)
+	}
+}
+
+func TestRestrictions_ToAPIPayload(t *testing.T) {
+	t.Run("nil_restrictions_serialize_to_null", func(t *testing.T) {
+		r := Rules{}
+		payload := r.ToAPIPayload()
+		if payload["restrictions"] != nil {
+			t.Errorf("expected restrictions=nil in payload, got %+v", payload["restrictions"])
+		}
+
+		// Confirm the JSON encodes as `"restrictions":null` so GitHub treats
+		// it as "no allowlist" (the existing behavior).
+		b, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(b, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded["restrictions"] != nil {
+			t.Errorf("expected JSON restrictions=null, got %v", decoded["restrictions"])
+		}
+	})
+
+	t.Run("populated_restrictions_serialize_to_object", func(t *testing.T) {
+		r := Rules{
+			Restrictions: &Restrictions{
+				Users: []string{"wdm0006"},
+				Teams: []string{},
+				Apps:  []string{"renovate"},
+			},
+		}
+		payload := r.ToAPIPayload()
+		restr, ok := payload["restrictions"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected restrictions to be a map, got %T (%v)", payload["restrictions"], payload["restrictions"])
+		}
+		if !reflect.DeepEqual(restr["users"], []string{"wdm0006"}) {
+			t.Errorf("expected users=[wdm0006], got %v", restr["users"])
+		}
+		if !reflect.DeepEqual(restr["apps"], []string{"renovate"}) {
+			t.Errorf("expected apps=[renovate], got %v", restr["apps"])
+		}
+		// GitHub requires arrays (not null) for each principal type.
+		if teams, ok := restr["teams"].([]string); !ok || len(teams) != 0 {
+			t.Errorf("expected teams=[] (non-nil empty slice), got %v (%T)", restr["teams"], restr["teams"])
+		}
+	})
+}
+
+func TestRestrictions_RulesFromResponse(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		resp := ProtectionResponse{}
+		r := RulesFromResponse(resp)
+		if r.Restrictions != nil {
+			t.Errorf("expected Restrictions=nil when API returned null, got %+v", r.Restrictions)
+		}
+	})
+
+	t.Run("populated", func(t *testing.T) {
+		raw := `{
+			"enforce_admins": {"enabled": true},
+			"allow_force_pushes": {"enabled": false},
+			"allow_deletions": {"enabled": false},
+			"required_linear_history": {"enabled": false},
+			"required_conversation_resolution": {"enabled": false},
+			"restrictions": {
+				"users": [{"login": "wdm0006"}],
+				"teams": [{"slug": "admins"}],
+				"apps":  [{"slug": "renovate"}]
+			}
+		}`
+		var resp ProtectionResponse
+		if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+			t.Fatal(err)
+		}
+		r := RulesFromResponse(resp)
+		if r.Restrictions == nil {
+			t.Fatal("expected Restrictions to be populated")
+		}
+		if !reflect.DeepEqual(r.Restrictions.Users, []string{"wdm0006"}) {
+			t.Errorf("expected users=[wdm0006], got %v", r.Restrictions.Users)
+		}
+		if !reflect.DeepEqual(r.Restrictions.Teams, []string{"admins"}) {
+			t.Errorf("expected teams=[admins], got %v", r.Restrictions.Teams)
+		}
+		if !reflect.DeepEqual(r.Restrictions.Apps, []string{"renovate"}) {
+			t.Errorf("expected apps=[renovate], got %v", r.Restrictions.Apps)
+		}
+	})
+}
+
+func TestRestrictions_Compare(t *testing.T) {
+	desired := Rules{
+		Restrictions: &Restrictions{
+			Users: []string{"wdm0006"},
+			Apps:  []string{"renovate"},
+		},
+	}
+
+	findDiff := func(diffs []RuleDiff, rule string) *RuleDiff {
+		for i := range diffs {
+			if diffs[i].Rule == rule {
+				return &diffs[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("no_actual_restrictions_fails", func(t *testing.T) {
+		actual := Rules{}
+		diffs := Compare(desired, actual, false)
+		d := findDiff(diffs, "restrictions")
+		if d == nil {
+			t.Fatal("expected a restrictions diff")
+		}
+		if d.Pass {
+			t.Errorf("expected restrictions diff to fail when actual has no allowlist, got %+v", d)
+		}
+	})
+
+	t.Run("exact_match_passes", func(t *testing.T) {
+		actual := Rules{
+			Restrictions: &Restrictions{
+				// Order swapped to exercise set-equality.
+				Users: []string{"wdm0006"},
+				Apps:  []string{"renovate"},
+			},
+		}
+		diffs := Compare(desired, actual, false)
+		d := findDiff(diffs, "restrictions")
+		if d == nil || !d.Pass {
+			t.Errorf("expected restrictions diff to pass for set-equal allowlists, got %+v", d)
+		}
+	})
+
+	t.Run("subset_fails_without_allow_stricter", func(t *testing.T) {
+		actual := Rules{
+			Restrictions: &Restrictions{
+				Users: []string{"wdm0006"},
+				// Missing apps:[renovate]
+			},
+		}
+		diffs := Compare(desired, actual, false)
+		d := findDiff(diffs, "restrictions")
+		if d == nil || d.Pass {
+			t.Errorf("expected restrictions diff to fail when allow_stricter=false, got %+v", d)
+		}
+	})
+
+	t.Run("subset_passes_with_allow_stricter", func(t *testing.T) {
+		actual := Rules{
+			Restrictions: &Restrictions{
+				Users: []string{"wdm0006"},
+			},
+		}
+		diffs := Compare(desired, actual, true)
+		d := findDiff(diffs, "restrictions")
+		if d == nil || !d.Pass {
+			t.Errorf("expected restrictions diff to pass when actual is subset and allow_stricter=true, got %+v", d)
+		}
+	})
+
+	t.Run("superset_fails_with_allow_stricter", func(t *testing.T) {
+		// Actual has MORE entries → less strict → should fail even with
+		// allow_stricter, because a larger allowlist is more permissive.
+		actual := Rules{
+			Restrictions: &Restrictions{
+				Users: []string{"wdm0006", "someone-else"},
+				Apps:  []string{"renovate"},
+			},
+		}
+		diffs := Compare(desired, actual, true)
+		d := findDiff(diffs, "restrictions")
+		if d == nil || d.Pass {
+			t.Errorf("expected restrictions diff to fail when actual is superset, got %+v", d)
+		}
+	})
+
+	t.Run("omitted_in_desired_skips_diff", func(t *testing.T) {
+		// When the user hasn't configured restrictions, audit should not
+		// flag a repo even if it happens to have an allowlist set.
+		desired := Rules{}
+		actual := Rules{
+			Restrictions: &Restrictions{Users: []string{"someone"}},
+		}
+		diffs := Compare(desired, actual, false)
+		if findDiff(diffs, "restrictions") != nil {
+			t.Error("expected no restrictions diff when desired.Restrictions is nil")
+		}
+	})
+}
+
+func TestRestrictions_MergeProtective(t *testing.T) {
+	t.Run("nil_and_set_yields_set", func(t *testing.T) {
+		a := Rules{}
+		b := Rules{Restrictions: &Restrictions{Users: []string{"u"}}}
+		m := MergeProtective(a, b)
+		if m.Restrictions == nil {
+			t.Fatal("expected merged restrictions to be the non-nil side")
+		}
+		if !reflect.DeepEqual(m.Restrictions.Users, []string{"u"}) {
+			t.Errorf("expected users=[u], got %v", m.Restrictions.Users)
+		}
+	})
+
+	t.Run("intersects_when_both_set", func(t *testing.T) {
+		a := Rules{Restrictions: &Restrictions{
+			Users: []string{"alice", "bob"},
+			Apps:  []string{"renovate"},
+		}}
+		b := Rules{Restrictions: &Restrictions{
+			Users: []string{"bob", "carol"},
+			Apps:  []string{"renovate", "dependabot"},
+		}}
+		m := MergeProtective(a, b)
+		got := m.Restrictions.Users
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, []string{"bob"}) {
+			t.Errorf("expected intersection users=[bob], got %v", m.Restrictions.Users)
+		}
+		if !reflect.DeepEqual(m.Restrictions.Apps, []string{"renovate"}) {
+			t.Errorf("expected intersection apps=[renovate], got %v", m.Restrictions.Apps)
+		}
+	})
+
+	t.Run("both_nil_stays_nil", func(t *testing.T) {
+		m := MergeProtective(Rules{}, Rules{})
+		if m.Restrictions != nil {
+			t.Errorf("expected nil restrictions, got %+v", m.Restrictions)
+		}
+	})
 }

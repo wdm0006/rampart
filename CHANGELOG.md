@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Add `restrictions` (push allowlist) support for protected branches. Specify `restrictions: {users, teams, apps}` under `rules` (or in an override) to limit direct pushes to listed actors. Audit compares set-equality; with `allow_stricter_rules: true`, an actual allowlist that is a subset of the configured one passes. Apply writes the allowlist via classic branch protection. Resolves [#5](https://github.com/wdm0006/rampart/issues/5).
+
 ## v0.6.0
 
 ### Features

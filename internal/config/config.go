@@ -26,37 +26,107 @@ type Override struct {
 // OverrideRules is a sparse version of Rules where all fields are pointers.
 // Only non-nil fields override the base config.
 type OverrideRules struct {
-	RequirePullRequest             *bool    `yaml:"require_pull_request"`
-	RequiredApprovals              *int     `yaml:"required_approvals"`
-	DismissStaleReviews            *bool    `yaml:"dismiss_stale_reviews"`
-	RequireCodeOwnerReviews        *bool    `yaml:"require_code_owner_reviews"`
-	RequireStatusChecks            *bool    `yaml:"require_status_checks"`
-	StrictStatusChecks             *bool    `yaml:"strict_status_checks"`
-	RequiredChecks                 []string `yaml:"required_checks"`
-	EnforceAdmins                  *bool    `yaml:"enforce_admins"`
-	AllowForcePushes               *bool    `yaml:"allow_force_pushes"`
-	AllowDeletions                 *bool    `yaml:"allow_deletions"`
-	RequiredLinearHistory          *bool    `yaml:"required_linear_history"`
-	RequiredConversationResolution *bool    `yaml:"required_conversation_resolution"`
+	RequirePullRequest             *bool         `yaml:"require_pull_request"`
+	RequiredApprovals              *int          `yaml:"required_approvals"`
+	DismissStaleReviews            *bool         `yaml:"dismiss_stale_reviews"`
+	RequireCodeOwnerReviews        *bool         `yaml:"require_code_owner_reviews"`
+	RequireStatusChecks            *bool         `yaml:"require_status_checks"`
+	StrictStatusChecks             *bool         `yaml:"strict_status_checks"`
+	RequiredChecks                 []string      `yaml:"required_checks"`
+	EnforceAdmins                  *bool         `yaml:"enforce_admins"`
+	AllowForcePushes               *bool         `yaml:"allow_force_pushes"`
+	AllowDeletions                 *bool         `yaml:"allow_deletions"`
+	RequiredLinearHistory          *bool         `yaml:"required_linear_history"`
+	RequiredConversationResolution *bool         `yaml:"required_conversation_resolution"`
+	Restrictions                   *Restrictions `yaml:"restrictions"`
 	// checksSet tracks whether required_checks was explicitly set in YAML
 	// (to distinguish [] from not specified)
 	checksSet bool
+	// restrictionsSet tracks whether restrictions was explicitly set in YAML
+	// (so an override can clear a base allowlist by setting `restrictions: null`).
+	restrictionsSet bool
 }
 
 // Rules represents the desired branch protection rules
 type Rules struct {
-	RequirePullRequest             bool     `yaml:"require_pull_request"`
-	RequiredApprovals              int      `yaml:"required_approvals"`
-	DismissStaleReviews            bool     `yaml:"dismiss_stale_reviews"`
-	RequireCodeOwnerReviews        bool     `yaml:"require_code_owner_reviews"`
-	RequireStatusChecks            bool     `yaml:"require_status_checks"`
-	StrictStatusChecks             bool     `yaml:"strict_status_checks"`
-	RequiredChecks                 []string `yaml:"required_checks"`
-	EnforceAdmins                  bool     `yaml:"enforce_admins"`
-	AllowForcePushes               bool     `yaml:"allow_force_pushes"`
-	AllowDeletions                 bool     `yaml:"allow_deletions"`
-	RequiredLinearHistory          bool     `yaml:"required_linear_history"`
-	RequiredConversationResolution bool     `yaml:"required_conversation_resolution"`
+	RequirePullRequest             bool          `yaml:"require_pull_request"`
+	RequiredApprovals              int           `yaml:"required_approvals"`
+	DismissStaleReviews            bool          `yaml:"dismiss_stale_reviews"`
+	RequireCodeOwnerReviews        bool          `yaml:"require_code_owner_reviews"`
+	RequireStatusChecks            bool          `yaml:"require_status_checks"`
+	StrictStatusChecks             bool          `yaml:"strict_status_checks"`
+	RequiredChecks                 []string      `yaml:"required_checks"`
+	EnforceAdmins                  bool          `yaml:"enforce_admins"`
+	AllowForcePushes               bool          `yaml:"allow_force_pushes"`
+	AllowDeletions                 bool          `yaml:"allow_deletions"`
+	RequiredLinearHistory          bool          `yaml:"required_linear_history"`
+	RequiredConversationResolution bool          `yaml:"required_conversation_resolution"`
+	Restrictions                   *Restrictions `yaml:"restrictions,omitempty"`
+}
+
+// Restrictions is the push allowlist for a protected branch. When set,
+// only the listed actors can push directly (bypassing other rules).
+// A nil value means "no allowlist configured" — anyone with write access may push.
+// An empty (non-nil) value means "no one may push directly".
+type Restrictions struct {
+	Users []string `yaml:"users" json:"users"`
+	Teams []string `yaml:"teams" json:"teams"`
+	Apps  []string `yaml:"apps"  json:"apps"`
+}
+
+// Equal reports whether two restriction sets contain the same users, teams,
+// and apps (order-independent).
+func (r *Restrictions) Equal(o *Restrictions) bool {
+	if r == nil && o == nil {
+		return true
+	}
+	if r == nil || o == nil {
+		return false
+	}
+	return stringSliceEqualSet(r.Users, o.Users) &&
+		stringSliceEqualSet(r.Teams, o.Teams) &&
+		stringSliceEqualSet(r.Apps, o.Apps)
+}
+
+// SubsetOf reports whether r is a subset of o (every user/team/app in r also
+// appears in o). A nil receiver counts as "no allowlist" — not a subset of any
+// non-nil allowlist.
+func (r *Restrictions) SubsetOf(o *Restrictions) bool {
+	if r == nil || o == nil {
+		return false
+	}
+	return stringSliceSubset(r.Users, o.Users) &&
+		stringSliceSubset(r.Teams, o.Teams) &&
+		stringSliceSubset(r.Apps, o.Apps)
+}
+
+func stringSliceEqualSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]bool, len(a))
+	for _, s := range a {
+		seen[s] = true
+	}
+	for _, s := range b {
+		if !seen[s] {
+			return false
+		}
+	}
+	return true
+}
+
+func stringSliceSubset(sub, super []string) bool {
+	seen := make(map[string]bool, len(super))
+	for _, s := range super {
+		seen[s] = true
+	}
+	for _, s := range sub {
+		if !seen[s] {
+			return false
+		}
+	}
+	return true
 }
 
 // RuleDiff represents a single rule comparison result
@@ -102,7 +172,53 @@ func MergeProtective(a, b Rules) Rules {
 		AllowDeletions:                 a.AllowDeletions && b.AllowDeletions,
 		RequiredLinearHistory:          a.RequiredLinearHistory || b.RequiredLinearHistory,
 		RequiredConversationResolution: a.RequiredConversationResolution || b.RequiredConversationResolution,
+		Restrictions:                   mergeRestrictionsProtective(a.Restrictions, b.Restrictions),
 	}
+}
+
+// mergeRestrictionsProtective returns the more restrictive (smaller) allowlist
+// when both sources set one. A nil source means "no allowlist" — anyone may
+// push — so it is not protective and the other side wins. When both are set,
+// the intersection is taken since only actors in both lists could push under
+// the combined policy.
+func mergeRestrictionsProtective(a, b *Restrictions) *Restrictions {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &Restrictions{
+		Users: intersectStrings(a.Users, b.Users),
+		Teams: intersectStrings(a.Teams, b.Teams),
+		Apps:  intersectStrings(a.Apps, b.Apps),
+	}
+}
+
+// stringSliceOrEmpty returns the slice as-is, or a freshly allocated empty
+// slice if nil. The GitHub API expects an empty JSON array (not null) for
+// each principal type in a restrictions payload.
+func stringSliceOrEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func intersectStrings(a, b []string) []string {
+	inB := make(map[string]bool, len(b))
+	for _, s := range b {
+		inB[s] = true
+	}
+	out := make([]string, 0)
+	seen := make(map[string]bool, len(a))
+	for _, s := range a {
+		if inB[s] && !seen[s] {
+			out = append(out, s)
+			seen[s] = true
+		}
+	}
+	return out
 }
 
 func mergeStringSlice(a, b []string) []string {
@@ -152,14 +268,17 @@ func (o *OverrideRules) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*o = OverrideRules(s)
 
-	// Check if required_checks key is present in the YAML node
+	// Track which keys were explicitly set in YAML so we can distinguish
+	// "absent" from "present but empty/null" for override semantics.
 	for i := 0; i < len(value.Content)-1; i += 2 {
-		if value.Content[i].Value == "required_checks" {
+		switch value.Content[i].Value {
+		case "required_checks":
 			o.checksSet = true
 			if o.RequiredChecks == nil {
 				o.RequiredChecks = []string{}
 			}
-			break
+		case "restrictions":
+			o.restrictionsSet = true
 		}
 	}
 	return nil
@@ -247,6 +366,9 @@ func mergeOverride(base Rules, o OverrideRules) Rules {
 	if o.RequiredConversationResolution != nil {
 		base.RequiredConversationResolution = *o.RequiredConversationResolution
 	}
+	if o.restrictionsSet {
+		base.Restrictions = o.Restrictions
+	}
 	return base
 }
 
@@ -267,13 +389,22 @@ func WriteDefault(path string) error {
 
 // ToAPIPayload translates Rules into the GitHub API PUT payload for branch protection
 func (r Rules) ToAPIPayload() map[string]interface{} {
+	var restrictions interface{}
+	if r.Restrictions != nil {
+		restrictions = map[string]interface{}{
+			"users": stringSliceOrEmpty(r.Restrictions.Users),
+			"teams": stringSliceOrEmpty(r.Restrictions.Teams),
+			"apps":  stringSliceOrEmpty(r.Restrictions.Apps),
+		}
+	}
+
 	payload := map[string]interface{}{
 		"enforce_admins":                   r.EnforceAdmins,
 		"allow_force_pushes":               r.AllowForcePushes,
 		"allow_deletions":                  r.AllowDeletions,
 		"required_linear_history":          r.RequiredLinearHistory,
 		"required_conversation_resolution": r.RequiredConversationResolution,
-		"restrictions":                     nil,
+		"restrictions":                     restrictions,
 	}
 
 	if r.RequirePullRequest {
@@ -330,6 +461,17 @@ type ProtectionResponse struct {
 	RequiredConversationResolution struct {
 		Enabled bool `json:"enabled"`
 	} `json:"required_conversation_resolution"`
+	Restrictions *struct {
+		Users []struct {
+			Login string `json:"login"`
+		} `json:"users"`
+		Teams []struct {
+			Slug string `json:"slug"`
+		} `json:"teams"`
+		Apps []struct {
+			Slug string `json:"slug"`
+		} `json:"apps"`
+	} `json:"restrictions"`
 }
 
 // RulesFromResponse converts a GitHub API protection response into Rules
@@ -356,6 +498,24 @@ func RulesFromResponse(resp ProtectionResponse) Rules {
 		if resp.RequiredStatusChecks.Contexts != nil {
 			r.RequiredChecks = resp.RequiredStatusChecks.Contexts
 		}
+	}
+
+	if resp.Restrictions != nil {
+		restr := &Restrictions{
+			Users: make([]string, 0, len(resp.Restrictions.Users)),
+			Teams: make([]string, 0, len(resp.Restrictions.Teams)),
+			Apps:  make([]string, 0, len(resp.Restrictions.Apps)),
+		}
+		for _, u := range resp.Restrictions.Users {
+			restr.Users = append(restr.Users, u.Login)
+		}
+		for _, t := range resp.Restrictions.Teams {
+			restr.Teams = append(restr.Teams, t.Slug)
+		}
+		for _, a := range resp.Restrictions.Apps {
+			restr.Apps = append(restr.Apps, a.Slug)
+		}
+		r.Restrictions = restr
 	}
 
 	return r
@@ -435,5 +595,36 @@ func Compare(desired, actual Rules, allowStricter bool) []RuleDiff {
 	addStricterBoolDiff("required_linear_history", desired.RequiredLinearHistory, actual.RequiredLinearHistory)
 	addStricterBoolDiff("required_conversation_resolution", desired.RequiredConversationResolution, actual.RequiredConversationResolution)
 
+	// Restrictions: only compared when the config explicitly opts in by
+	// setting `restrictions`. Without that, omit the diff entirely so configs
+	// that don't care about push allowlists behave exactly as before.
+	if desired.Restrictions != nil {
+		var pass bool
+		switch {
+		case actual.Restrictions == nil:
+			pass = false
+		case desired.Restrictions.Equal(actual.Restrictions):
+			pass = true
+		case allowStricter:
+			// A stricter (smaller) allowlist is a subset of the configured one.
+			pass = actual.Restrictions.SubsetOf(desired.Restrictions)
+		default:
+			pass = false
+		}
+		addDiff("restrictions", pass,
+			formatRestrictions(desired.Restrictions),
+			formatRestrictions(actual.Restrictions))
+	}
+
 	return diffs
+}
+
+func formatRestrictions(r *Restrictions) string {
+	if r == nil {
+		return "<none>"
+	}
+	return fmt.Sprintf("users=%v teams=%v apps=%v",
+		stringSliceOrEmpty(r.Users),
+		stringSliceOrEmpty(r.Teams),
+		stringSliceOrEmpty(r.Apps))
 }

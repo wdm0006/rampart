@@ -67,6 +67,19 @@ var applyCmd = &cobra.Command{
 				if err != nil {
 					fmt.Printf(" failed: %s\n", err)
 					failed++
+				} else if r.EffectiveRules.Restrictions != nil {
+					// Push allowlists (restrictions) are only expressible via
+					// classic branch protection — the rulesets API uses
+					// bypass_actors with numeric actor IDs, which we don't
+					// resolve here. Apply both so the allowlist takes effect.
+					fmt.Print(" + classic restrictions...")
+					if err := github.SetBranchProtection(owner, r.Repo, r.Branch, r.EffectiveRules); err != nil {
+						fmt.Printf(" failed: %s\n", err)
+						failed++
+					} else {
+						fmt.Println(" done")
+						updated++
+					}
 				} else {
 					fmt.Println(" done")
 					updated++
