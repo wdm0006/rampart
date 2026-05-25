@@ -121,6 +121,43 @@ required_conversation_resolution (bool, default: false)
   Require all review conversations on a pull request to be resolved
   before merging. This ensures all feedback has been addressed.
 
+restrictions (object, default: not set)
+  Push allowlist: when set, only the listed users, teams, and GitHub
+  Apps are allowed to push directly to the protected branch. Useful
+  for solo maintainers who need to keep specific bot accounts (e.g.
+  a misbehaving GitHub App) off main when the "require approvals"
+  pattern can't be used because there is no second human reviewer.
+
+  Omit this field for the same behavior as before (no allowlist —
+  anyone with write access may push). Set it to an empty object to
+  block all direct pushes.
+
+  Subfields:
+    users  — list of GitHub usernames allowed to push
+    teams  — list of team slugs allowed to push
+    apps   — list of GitHub App slugs allowed to push (e.g. "renovate")
+
+  Audit semantics: with allow_stricter_rules=false, the allowlist must
+  match the configured one exactly (set-equality). With
+  allow_stricter_rules=true, an actual allowlist that is a subset of
+  the configured one passes (a smaller allowlist is stricter).
+
+  Override semantics: an override's restrictions block fully replaces
+  the base (not merged) — set restrictions: null to clear the base
+  allowlist for matching repos.
+
+  Apply path: rampart writes restrictions via classic branch
+  protection (which natively supports actor lists by name). The
+  ruleset that rampart manages does not currently carry the
+  allowlist, so applying restrictions to a repo where rulesets are
+  the only enforcement mechanism may not have the intended effect.
+
+  Example:
+    restrictions:
+      users: [wdm0006]
+      teams: []
+      apps:  [renovate]
+
 OVERRIDES
 =========
 
