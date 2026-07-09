@@ -652,3 +652,191 @@ func TestRestrictions_MergeProtective(t *testing.T) {
 		}
 	})
 }
+
+// TestCompare exercises the general bool/approvals/checks paths of Compare for
+// both allowStricter values. Each case asserts on the Pass field of specific
+// RuleDiff entries (looked up by Rule name) rather than overall compliance.
+func TestCompare(t *testing.T) {
+	findDiff := func(diffs []RuleDiff, rule string) *RuleDiff {
+		for i := range diffs {
+			if diffs[i].Rule == rule {
+				return &diffs[i]
+			}
+		}
+		return nil
+	}
+
+	// A fully-protected desired config that touches every rule category.
+	fullDesired := Rules{
+		RequirePullRequest:             true,
+		RequiredApprovals:              2,
+		DismissStaleReviews:            true,
+		RequireCodeOwnerReviews:        true,
+		RequireStatusChecks:            true,
+		StrictStatusChecks:             true,
+		RequiredChecks:                 []string{"build", "test"},
+		EnforceAdmins:                  true,
+		AllowForcePushes:               false,
+		AllowDeletions:                 false,
+		RequiredLinearHistory:          true,
+		RequiredConversationResolution: true,
+	}
+
+	tests := []struct {
+		name          string
+		desired       Rules
+		actual        Rules
+		allowStricter bool
+		// want maps rule name -> expected Pass value. Only listed rules are checked.
+		want map[string]bool
+		// absent lists rule names that must NOT appear in the diff.
+		absent []string
+	}{
+		{
+			name:          "exact_match_passes_strict_false",
+			desired:       fullDesired,
+			actual:        fullDesired,
+			allowStricter: false,
+			want: map[string]bool{
+				"require_pull_request":             true,
+				"required_approvals":               true,
+				"dismiss_stale_reviews":            true,
+				"require_code_owner_reviews":       true,
+				"require_status_checks":            true,
+				"strict_status_checks":             true,
+				"required_checks":                  true,
+				"enforce_admins":                   true,
+				"allow_force_pushes":               true,
+				"allow_deletions":                  true,
+				"required_linear_history":          true,
+				"required_conversation_resolution": true,
+			},
+		},
+		{
+			name:          "exact_match_passes_strict_true",
+			desired:       fullDesired,
+			actual:        fullDesired,
+			allowStricter: true,
+			want: map[string]bool{
+				"require_pull_request": true,
+				"required_approvals":   true,
+				"required_checks":      true,
+				"enforce_admins":       true,
+				"allow_force_pushes":   true,
+			},
+		},
+		{
+			// true-is-stricter rule: actual stricter (true) than desired (false).
+			name:          "stricter_bool_fails_when_not_allowed",
+			desired:       Rules{EnforceAdmins: false},
+			actual:        Rules{EnforceAdmins: true},
+			allowStricter: false,
+			want:          map[string]bool{"enforce_admins": false},
+		},
+		{
+			name:          "stricter_bool_passes_when_allowed",
+			desired:       Rules{EnforceAdmins: false},
+			actual:        Rules{EnforceAdmins: true},
+			allowStricter: true,
+			want:          map[string]bool{"enforce_admins": true},
+		},
+		{
+			// allow_* rule: false is stricter; actual false vs desired true.
+			name:          "stricter_allow_rule_fails_when_not_allowed",
+			desired:       Rules{AllowForcePushes: true},
+			actual:        Rules{AllowForcePushes: false},
+			allowStricter: false,
+			want:          map[string]bool{"allow_force_pushes": false},
+		},
+		{
+			name:          "stricter_allow_rule_passes_when_allowed",
+			desired:       Rules{AllowForcePushes: true},
+			actual:        Rules{AllowForcePushes: false},
+			allowStricter: true,
+			want:          map[string]bool{"allow_force_pushes": true},
+		},
+		{
+			// required_approvals: actual greater than desired.
+			name:          "more_approvals_fails_when_not_allowed",
+			desired:       Rules{RequirePullRequest: true, RequiredApprovals: 1},
+			actual:        Rules{RequirePullRequest: true, RequiredApprovals: 3},
+			allowStricter: false,
+			want:          map[string]bool{"required_approvals": false},
+		},
+		{
+			name:          "more_approvals_passes_when_allowed",
+			desired:       Rules{RequirePullRequest: true, RequiredApprovals: 1},
+			actual:        Rules{RequirePullRequest: true, RequiredApprovals: 3},
+			allowStricter: true,
+			want:          map[string]bool{"required_approvals": true},
+		},
+		{
+			// required_approvals: actual lower than desired always fails.
+			name:          "fewer_approvals_fails_even_when_allowed",
+			desired:       Rules{RequirePullRequest: true, RequiredApprovals: 2},
+			actual:        Rules{RequirePullRequest: true, RequiredApprovals: 1},
+			allowStricter: true,
+			want:          map[string]bool{"required_approvals": false},
+		},
+		{
+			// required_checks: actual superset of desired.
+			name:          "checks_superset_fails_when_not_allowed",
+			desired:       Rules{RequireStatusChecks: true, RequiredChecks: []string{"build"}},
+			actual:        Rules{RequireStatusChecks: true, RequiredChecks: []string{"build", "test"}},
+			allowStricter: false,
+			want:          map[string]bool{"required_checks": false},
+		},
+		{
+			name:          "checks_superset_passes_when_allowed",
+			desired:       Rules{RequireStatusChecks: true, RequiredChecks: []string{"build"}},
+			actual:        Rules{RequireStatusChecks: true, RequiredChecks: []string{"build", "test"}},
+			allowStricter: true,
+			want:          map[string]bool{"required_checks": true},
+		},
+		{
+			// required_checks: missing a desired check always fails.
+			name:          "checks_missing_fails_even_when_allowed",
+			desired:       Rules{RequireStatusChecks: true, RequiredChecks: []string{"build", "test"}},
+			actual:        Rules{RequireStatusChecks: true, RequiredChecks: []string{"build"}},
+			allowStricter: true,
+			want:          map[string]bool{"required_checks": false},
+		},
+		{
+			// Sub-rules are not emitted when their parent toggle is false.
+			name:          "pr_disabled_omits_sub_rules",
+			desired:       Rules{RequirePullRequest: false, RequiredApprovals: 2},
+			actual:        Rules{},
+			allowStricter: false,
+			want:          map[string]bool{"require_pull_request": true},
+			absent:        []string{"required_approvals", "dismiss_stale_reviews", "require_code_owner_reviews"},
+		},
+		{
+			name:          "status_checks_disabled_omits_sub_rules",
+			desired:       Rules{RequireStatusChecks: false, RequiredChecks: []string{"build"}},
+			actual:        Rules{},
+			allowStricter: false,
+			want:          map[string]bool{"require_status_checks": true},
+			absent:        []string{"strict_status_checks", "required_checks"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs := Compare(tt.desired, tt.actual, tt.allowStricter)
+			for rule, wantPass := range tt.want {
+				d := findDiff(diffs, rule)
+				if d == nil {
+					t.Fatalf("expected a %q diff, got none", rule)
+				}
+				if d.Pass != wantPass {
+					t.Errorf("rule %q: Pass=%t, want %t (want=%q got=%q)", rule, d.Pass, wantPass, d.Want, d.Got)
+				}
+			}
+			for _, rule := range tt.absent {
+				if d := findDiff(diffs, rule); d != nil {
+					t.Errorf("expected no %q diff, got %+v", rule, d)
+				}
+			}
+		})
+	}
+}
