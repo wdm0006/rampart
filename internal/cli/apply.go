@@ -12,7 +12,7 @@ var applyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Apply branch protection rules to non-compliant repos",
 	Long:  `Applies the branch protection rules defined in rampart.yaml to any repos that don't match the desired configuration.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		owner, _ := cmd.Flags().GetString("owner")
 		repo, _ := cmd.Flags().GetString("repo")
 		exclude, _ := cmd.Flags().GetStringSlice("exclude")
@@ -46,7 +46,7 @@ var applyCmd = &cobra.Command{
 
 		if len(toUpdate) == 0 {
 			fmt.Println("\nAll repos are compliant. Nothing to apply.")
-			return
+			return nil
 		}
 
 		fmt.Printf("\n%d repo(s) to update:\n\n", len(toUpdate))
@@ -99,7 +99,17 @@ var applyCmd = &cobra.Command{
 			}
 			fmt.Printf("Results: %d updated, %d failed, %d skipped\n", updated, failed, skipped)
 		}
+
+		return applyResultError(dryRun, failed)
 	},
+}
+
+func applyResultError(dryRun bool, failed int) error {
+	if dryRun || failed == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%d repository update(s) failed", failed)
 }
 
 func init() {
