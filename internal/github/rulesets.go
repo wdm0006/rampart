@@ -250,7 +250,7 @@ func SetRuleset(owner, repo, branch string, rules config.Rules) error {
 
 func findRampartRuleset(owner, repo string) (int, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/rulesets", owner, repo)
-	cmd := exec.Command("gh", "api", endpoint)
+	cmd := exec.Command("gh", "api", endpoint, "--paginate")
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -268,13 +268,16 @@ func findRampartRuleset(owner, repo string) (int, error) {
 		return 0, fmt.Errorf("failed to parse rulesets: %w", err)
 	}
 
-	for _, rs := range rulesets {
-		if rs.Name == "rampart" {
-			return rs.ID, nil
+	return rampartRulesetID(rulesets), nil
+}
+
+func rampartRulesetID(rulesets []rulesetListEntry) int {
+	for _, ruleset := range rulesets {
+		if ruleset.Name == "rampart" {
+			return ruleset.ID
 		}
 	}
-
-	return 0, nil
+	return 0
 }
 
 func buildRulesetPayload(branch string, rules config.Rules) map[string]interface{} {

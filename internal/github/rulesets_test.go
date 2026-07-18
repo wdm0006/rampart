@@ -358,3 +358,46 @@ func TestDedup(t *testing.T) {
 		})
 	}
 }
+
+func TestRampartRulesetID(t *testing.T) {
+	tests := []struct {
+		name     string
+		rulesets []rulesetListEntry
+		want     int
+	}{
+		{
+			name: "finds rampart after other rulesets",
+			rulesets: []rulesetListEntry{
+				{ID: 10, Name: "default"},
+				{ID: 20, Name: "release"},
+				{ID: 30, Name: "rampart"},
+			},
+			want: 30,
+		},
+		{
+			name: "returns zero when rampart is absent",
+			rulesets: []rulesetListEntry{
+				{ID: 10, Name: "default"},
+				{ID: 20, Name: "release"},
+			},
+			want: 0,
+		},
+		{
+			name: "returns first rampart when names are duplicated",
+			rulesets: []rulesetListEntry{
+				{ID: 10, Name: "rampart"},
+				{ID: 20, Name: "default"},
+				{ID: 30, Name: "rampart"},
+			},
+			want: 10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rampartRulesetID(tt.rulesets); got != tt.want {
+				t.Errorf("rampartRulesetID() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
