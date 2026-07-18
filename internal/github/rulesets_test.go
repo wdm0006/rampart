@@ -183,6 +183,53 @@ func TestBuildRulesetPayload_EnforceAdmins(t *testing.T) {
 	})
 }
 
+func TestEnforceAdminsFromBypassActors(t *testing.T) {
+	tests := []struct {
+		name   string
+		actors []bypassActor
+		want   bool
+	}{
+		{name: "no bypass actors enforces admins", want: true},
+		{
+			name: "admin repository role bypass does not enforce admins",
+			actors: []bypassActor{
+				{ActorID: 5, ActorType: "RepositoryRole"},
+			},
+			want: false,
+		},
+		{
+			name: "other repository role does not bypass admins",
+			actors: []bypassActor{
+				{ActorID: 4, ActorType: "RepositoryRole"},
+			},
+			want: true,
+		},
+		{
+			name: "same actor ID with another type does not bypass admins",
+			actors: []bypassActor{
+				{ActorID: 5, ActorType: "Team"},
+			},
+			want: true,
+		},
+		{
+			name: "admin bypass among other actors does not enforce admins",
+			actors: []bypassActor{
+				{ActorID: 1, ActorType: "OrganizationAdmin"},
+				{ActorID: 5, ActorType: "RepositoryRole"},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := enforceAdminsFromBypassActors(tt.actors); got != tt.want {
+				t.Errorf("enforceAdminsFromBypassActors() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildRulesetPayload_Conditions(t *testing.T) {
 	payload := buildRulesetPayload("develop", config.Rules{})
 
