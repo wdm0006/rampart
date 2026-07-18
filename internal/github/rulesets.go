@@ -14,6 +14,16 @@ import (
 type branchRule struct {
 	Type       string          `json:"type"`
 	Parameters json.RawMessage `json:"parameters,omitempty"`
+	RulesetID  int             `json:"ruleset_id"`
+}
+
+type bypassActor struct {
+	ActorID   int    `json:"actor_id"`
+	ActorType string `json:"actor_type"`
+}
+
+type rulesetDetail struct {
+	BypassActors []bypassActor `json:"bypass_actors"`
 }
 
 type pullRequestParams struct {
@@ -65,7 +75,50 @@ func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
 		return config.NoProtectionRules(), nil
 	}
 
-	return rulesFromBranchRules(rules), nil
+	r := rulesFromBranchRules(rules)
+	rulesetIDs := make([]int, 0)
+	for _, rule := range rules {
+		if rule.RulesetID == 0 {
+			return r, nil
+		}
+		rulesetIDs = append(rulesetIDs, rule.RulesetID)
+	}
+
+	for _, rulesetID := range dedupInts(rulesetIDs) {
+		detail, err := getRulesetDetail(owner, repo, rulesetID)
+		if err != nil {
+			return r, nil
+		}
+		if !enforceAdminsFromBypassActors(detail.BypassActors) {
+			return r, nil
+		}
+	}
+	r.EnforceAdmins = true
+
+	return r, nil
+}
+
+func getRulesetDetail(owner, repo string, rulesetID int) (rulesetDetail, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/rulesets/%d", owner, repo, rulesetID)
+	output, err := exec.Command("gh", "api", endpoint).Output()
+	if err != nil {
+		return rulesetDetail{}, err
+	}
+
+	var detail rulesetDetail
+	if err := json.Unmarshal(output, &detail); err != nil {
+		return rulesetDetail{}, err
+	}
+	return detail, nil
+}
+
+func enforceAdminsFromBypassActors(actors []bypassActor) bool {
+	for _, actor := range actors {
+		if actor.ActorType == "RepositoryRole" && actor.ActorID == 5 {
+			return false
+		}
+	}
+	return true
 }
 
 // rulesFromBranchRules converts the effective branch rules API response into
@@ -126,6 +179,18 @@ func dedup(ss []string) []string {
 		if !seen[s] {
 			seen[s] = true
 			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func dedupInts(values []int) []int {
+	seen := make(map[int]bool, len(values))
+	result := make([]int, 0, len(values))
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
 		}
 	}
 	return result
