@@ -132,17 +132,7 @@ func GetBranchProtection(owner, repo, branch string) (config.Rules, bool, error)
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			// 404 = no protection configured
-			if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
-				strings.Contains(stderr, "Branch not protected") {
-				return config.NoProtectionRules(), true, nil
-			}
-			// 403 = no permission
-			if strings.Contains(stderr, "403") || strings.Contains(stderr, "Must have admin") {
-				return config.Rules{}, false, fmt.Errorf("insufficient permissions")
-			}
-			return config.Rules{}, false, fmt.Errorf("gh api failed: %s", stderr)
+			return classifyProtectionResult(string(exitErr.Stderr))
 		}
 		return config.Rules{}, false, fmt.Errorf("failed to run gh: %w", err)
 	}
@@ -153,6 +143,17 @@ func GetBranchProtection(owner, repo, branch string) (config.Rules, bool, error)
 	}
 
 	return config.RulesFromResponse(resp), true, nil
+}
+
+func classifyProtectionResult(stderr string) (config.Rules, bool, error) {
+	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
+		strings.Contains(stderr, "Branch not protected") {
+		return config.NoProtectionRules(), true, nil
+	}
+	if strings.Contains(stderr, "403") || strings.Contains(stderr, "Must have admin") {
+		return config.Rules{}, false, fmt.Errorf("insufficient permissions")
+	}
+	return config.Rules{}, false, fmt.Errorf("gh api failed: %s", stderr)
 }
 
 // SetBranchProtection applies branch protection rules to a repo

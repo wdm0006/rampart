@@ -35,6 +35,58 @@ func checks(t *testing.T, strict bool, contexts ...string) branchRule {
 	return branchRule{Type: "required_status_checks", Parameters: raw}
 }
 
+func TestClassifyBranchRulesError(t *testing.T) {
+	tests := []struct {
+		name    string
+		stderr  string
+		handled bool
+		wantErr string
+	}{
+		{name: "404 status", stderr: "gh: rules unavailable (HTTP 404)", handled: true},
+		{name: "not found wording", stderr: "gh: Not Found", handled: true},
+		// Ruleset reads intentionally swallow 403 errors, unlike classic protection reads.
+		{name: "403 status", stderr: "gh: Resource not accessible (HTTP 403)", handled: true},
+		{name: "unrecognized error", stderr: "gh: service unavailable", wantErr: "gh api failed: gh: service unavailable"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handled, err := classifyBranchRulesError(tt.stderr)
+			if handled != tt.handled {
+				t.Errorf("classifyBranchRulesError() handled = %v, want %v", handled, tt.handled)
+			}
+			if gotErr := errorString(err); gotErr != tt.wantErr {
+				t.Errorf("classifyBranchRulesError() error = %q, want %q", gotErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestClassifyRulesetListError(t *testing.T) {
+	tests := []struct {
+		name    string
+		stderr  string
+		handled bool
+		wantErr string
+	}{
+		{name: "404 status", stderr: "gh: rulesets unavailable (HTTP 404)", handled: true},
+		{name: "not found wording", stderr: "gh: Not Found", handled: true},
+		{name: "unrecognized error", stderr: "gh: service unavailable", wantErr: "failed to list rulesets: gh: service unavailable"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handled, err := classifyRulesetListError(tt.stderr)
+			if handled != tt.handled {
+				t.Errorf("classifyRulesetListError() handled = %v, want %v", handled, tt.handled)
+			}
+			if gotErr := errorString(err); gotErr != tt.wantErr {
+				t.Errorf("classifyRulesetListError() error = %q, want %q", gotErr, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestRulesFromBranchRules(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -55,13 +55,11 @@ func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			// 404 or 403 = no rulesets, not available, or no permission
-			if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
-				strings.Contains(stderr, "403") {
+			handled, classifyErr := classifyBranchRulesError(string(exitErr.Stderr))
+			if handled {
 				return config.NoProtectionRules(), nil
 			}
-			return config.Rules{}, fmt.Errorf("gh api failed: %s", stderr)
+			return config.Rules{}, classifyErr
 		}
 		return config.Rules{}, fmt.Errorf("failed to run gh: %w", err)
 	}
@@ -96,6 +94,14 @@ func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
 	r.EnforceAdmins = true
 
 	return r, nil
+}
+
+func classifyBranchRulesError(stderr string) (bool, error) {
+	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
+		strings.Contains(stderr, "403") {
+		return true, nil
+	}
+	return false, fmt.Errorf("gh api failed: %s", stderr)
 }
 
 func getRulesetDetail(owner, repo string, rulesetID int) (rulesetDetail, error) {
@@ -254,11 +260,11 @@ func findRampartRuleset(owner, repo string) (int, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") {
+			handled, classifyErr := classifyRulesetListError(string(exitErr.Stderr))
+			if handled {
 				return 0, nil
 			}
-			return 0, fmt.Errorf("failed to list rulesets: %s", stderr)
+			return 0, classifyErr
 		}
 		return 0, fmt.Errorf("failed to run gh: %w", err)
 	}
@@ -269,6 +275,13 @@ func findRampartRuleset(owner, repo string) (int, error) {
 	}
 
 	return rampartRulesetID(rulesets), nil
+}
+
+func classifyRulesetListError(stderr string) (bool, error) {
+	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") {
+		return true, nil
+	}
+	return false, fmt.Errorf("failed to list rulesets: %s", stderr)
 }
 
 func rampartRulesetID(rulesets []rulesetListEntry) int {
