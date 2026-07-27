@@ -24,3 +24,24 @@ func TestApplyResultError(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldApply(t *testing.T) {
+	tests := []struct {
+		name   string
+		result RepoAuditResult
+		want   bool
+	}{
+		{name: "non-compliant repository", result: RepoAuditResult{}, want: true},
+		{name: "compliant repository", result: RepoAuditResult{Compliant: true}},
+		{name: "skipped repository", result: RepoAuditResult{Skipped: true}},
+		{name: "repository with read error", result: RepoAuditResult{Error: "ruleset state unavailable"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldApply(tt.result); got != tt.want {
+				t.Errorf("shouldApply() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

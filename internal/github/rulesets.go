@@ -46,13 +46,21 @@ type rulesetListEntry struct {
 	Name string `json:"name"`
 }
 
+type commandRunner func(name string, args ...string) ([]byte, error)
+
 // GetBranchRules returns the effective ruleset-based rules for a branch
-// by querying the GitHub branch rules endpoint. Returns permissive defaults
-// if no rulesets apply or the endpoint is unavailable.
+// by querying the GitHub branch rules endpoint.
 func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
+	return getBranchRules(owner, repo, branch, runCommand)
+}
+
+func runCommand(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).Output()
+}
+
+func getBranchRules(owner, repo, branch string, run commandRunner) (config.Rules, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/rules/branches/%s", owner, repo, branch)
-	cmd := exec.Command("gh", "api", endpoint, "--paginate")
-	output, err := cmd.Output()
+	output, err := run("gh", "api", endpoint, "--paginate")
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			handled, classifyErr := classifyBranchRulesError(string(exitErr.Stderr))
@@ -83,9 +91,9 @@ func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
 	}
 
 	for _, rulesetID := range dedupInts(rulesetIDs) {
-		detail, err := getRulesetDetail(owner, repo, rulesetID)
+		detail, err := getRulesetDetail(owner, repo, rulesetID, run)
 		if err != nil {
-			return r, nil
+			return config.Rules{}, err
 		}
 		if !enforceAdminsFromBypassActors(detail.BypassActors) {
 			return r, nil
@@ -97,23 +105,28 @@ func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
 }
 
 func classifyBranchRulesError(stderr string) (bool, error) {
-	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
-		strings.Contains(stderr, "403") {
+	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") {
 		return true, nil
+	}
+	if strings.Contains(stderr, "403") {
+		return false, fmt.Errorf("insufficient permissions to read branch rules")
 	}
 	return false, fmt.Errorf("gh api failed: %s", stderr)
 }
 
-func getRulesetDetail(owner, repo string, rulesetID int) (rulesetDetail, error) {
+func getRulesetDetail(owner, repo string, rulesetID int, run commandRunner) (rulesetDetail, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/rulesets/%d", owner, repo, rulesetID)
-	output, err := exec.Command("gh", "api", endpoint).Output()
+	output, err := run("gh", "api", endpoint)
 	if err != nil {
-		return rulesetDetail{}, err
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return rulesetDetail{}, fmt.Errorf("failed to read ruleset %d: %s", rulesetID, string(exitErr.Stderr))
+		}
+		return rulesetDetail{}, fmt.Errorf("failed to run gh for ruleset %d: %w", rulesetID, err)
 	}
 
 	var detail rulesetDetail
 	if err := json.Unmarshal(output, &detail); err != nil {
-		return rulesetDetail{}, err
+		return rulesetDetail{}, fmt.Errorf("failed to parse ruleset %d: %w", rulesetID, err)
 	}
 	return detail, nil
 }
