@@ -36,7 +36,7 @@ var applyCmd = &cobra.Command{
 		}
 		var toUpdate []repoUpdate
 		for _, r := range results {
-			if !r.Compliant && !r.Skipped && r.Error == "" {
+			if shouldApply(r) {
 				toUpdate = append(toUpdate, repoUpdate{
 					RepoAuditResult: r,
 					EffectiveRules:  cfg.RulesForRepo(r.Repo),
@@ -102,6 +102,10 @@ var applyCmd = &cobra.Command{
 
 		return applyResultError(dryRun, failed)
 	},
+}
+
+func shouldApply(result RepoAuditResult) bool {
+	return !result.Compliant && !result.Skipped && result.Error == ""
 }
 
 func applyResultError(dryRun bool, failed int) error {

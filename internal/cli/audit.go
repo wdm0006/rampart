@@ -19,6 +19,11 @@ type RepoAuditResult struct {
 	Skipped   bool
 }
 
+var (
+	getBranchProtection = github.GetBranchProtection
+	getBranchRules      = github.GetBranchRules
+)
+
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Check repos against branch protection config",
@@ -151,7 +156,7 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 		}
 
 		// Get classic branch protection rules
-		classicRules, ok, err := github.GetBranchProtection(owner, r.Name, branch)
+		classicRules, ok, err := getBranchProtection(owner, r.Name, branch)
 		if err != nil {
 			results = append(results, RepoAuditResult{
 				Repo:  r.Name,
@@ -169,10 +174,14 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 		}
 
 		// Get ruleset-based rules
-		rulesetRules, err := github.GetBranchRules(owner, r.Name, branch)
+		rulesetRules, err := getBranchRules(owner, r.Name, branch)
 		if err != nil {
-			// Non-fatal: if rulesets endpoint fails, just use classic rules
-			rulesetRules = config.NoProtectionRules()
+			results = append(results, RepoAuditResult{
+				Repo:   r.Name,
+				Branch: branch,
+				Error:  err.Error(),
+			})
+			continue
 		}
 
 		// Merge: the effective protection is the most restrictive

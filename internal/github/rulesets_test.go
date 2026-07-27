@@ -2,7 +2,10 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wdm0006/rampart/internal/config"
@@ -44,8 +47,7 @@ func TestClassifyBranchRulesError(t *testing.T) {
 	}{
 		{name: "404 status", stderr: "gh: rules unavailable (HTTP 404)", handled: true},
 		{name: "not found wording", stderr: "gh: Not Found", handled: true},
-		// Ruleset reads intentionally swallow 403 errors, unlike classic protection reads.
-		{name: "403 status", stderr: "gh: Resource not accessible (HTTP 403)", handled: true},
+		{name: "403 status", stderr: "gh: Resource not accessible (HTTP 403)", wantErr: "insufficient permissions to read branch rules"},
 		{name: "unrecognized error", stderr: "gh: service unavailable", wantErr: "gh api failed: gh: service unavailable"},
 	}
 
@@ -57,6 +59,120 @@ func TestClassifyBranchRulesError(t *testing.T) {
 			}
 			if gotErr := errorString(err); gotErr != tt.wantErr {
 				t.Errorf("classifyBranchRulesError() error = %q, want %q", gotErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGetBranchRulesReadResults(t *testing.T) {
+	exitError := func(stderr string) error {
+		return &exec.ExitError{Stderr: []byte(stderr)}
+	}
+	tests := []struct {
+		name        string
+		output      string
+		runErr      error
+		want        config.Rules
+		wantErr     string
+		wantCommand []string
+	}{
+		{
+			name:        "404 maps to no protection",
+			runErr:      exitError("gh: Not Found (HTTP 404)"),
+			want:        config.NoProtectionRules(),
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+		{
+			name:        "403 is surfaced",
+			runErr:      exitError("gh: Resource not accessible (HTTP 403)"),
+			wantErr:     "insufficient permissions to read branch rules",
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+		{
+			name:        "unexpected command failure is surfaced",
+			runErr:      errors.New("executable missing"),
+			wantErr:     "failed to run gh: executable missing",
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+		{
+			name:        "invalid JSON is surfaced",
+			output:      "{",
+			wantErr:     "failed to parse branch rules:",
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+		{
+			name:        "empty response maps to no protection",
+			output:      "[]",
+			want:        config.NoProtectionRules(),
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+		{
+			name:   "successful response is mapped",
+			output: `[{"type":"non_fast_forward"}]`,
+			want: config.Rules{
+				RequiredChecks:   []string{},
+				AllowForcePushes: false,
+				AllowDeletions:   true,
+			},
+			wantCommand: []string{"gh", "api", "repos/acme/widget/rules/branches/main", "--paginate"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCommand []string
+			run := func(name string, args ...string) ([]byte, error) {
+				gotCommand = append([]string{name}, args...)
+				return []byte(tt.output), tt.runErr
+			}
+			got, err := getBranchRules("acme", "widget", "main", run)
+			if !reflect.DeepEqual(gotCommand, tt.wantCommand) {
+				t.Errorf("command = %v, want %v", gotCommand, tt.wantCommand)
+			}
+			if gotErr := errorString(err); tt.wantErr == "" && gotErr != "" ||
+				tt.wantErr != "" && !strings.Contains(gotErr, tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", gotErr, tt.wantErr)
+			}
+			if tt.wantErr == "" && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("rules = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetBranchRulesSurfacesRulesetDetailErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		detail    string
+		detailErr error
+		wantErr   string
+	}{
+		{
+			name:      "detail command failure",
+			detailErr: &exec.ExitError{Stderr: []byte("gh: service unavailable")},
+			wantErr:   "failed to read ruleset 42: gh: service unavailable",
+		},
+		{
+			name:    "invalid detail JSON",
+			detail:  "{",
+			wantErr: "failed to parse ruleset 42:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := 0
+			run := func(_ string, _ ...string) ([]byte, error) {
+				call++
+				if call == 1 {
+					return []byte(`[{"type":"non_fast_forward","ruleset_id":42}]`), nil
+				}
+				return []byte(tt.detail), tt.detailErr
+			}
+
+			_, err := getBranchRules("acme", "widget", "main", run)
+			if got := errorString(err); !strings.Contains(got, tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", got, tt.wantErr)
 			}
 		})
 	}
