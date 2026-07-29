@@ -1,9 +1,14 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"reflect"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -266,6 +271,11 @@ func (o *OverrideRules) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode(&s); err != nil {
 		return err
 	}
+	// yaml.Decoder.KnownFields does not reach a type with a custom
+	// UnmarshalYAML, so unknown keys are rejected here instead.
+	if err := checkKnownFields(value, reflect.TypeOf(OverrideRules{})); err != nil {
+		return err
+	}
 	*o = OverrideRules(s)
 
 	// Track which keys were explicitly set in YAML so we can distinguish
@@ -284,6 +294,46 @@ func (o *OverrideRules) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// checkKnownFields reports an error for the first mapping key in node that has
+// no yaml-tagged field in the struct type t, recursing into nested struct
+// fields. The message mirrors yaml.v3's own unknown-field wording.
+func checkKnownFields(node *yaml.Node, t reflect.Type) error {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if node.Kind != yaml.MappingNode || t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	fields := make(map[string]reflect.Type, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.PkgPath != "" {
+			continue
+		}
+		name := strings.Split(f.Tag.Get("yaml"), ",")[0]
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = strings.ToLower(f.Name)
+		}
+		fields[name] = f.Type
+	}
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, val := node.Content[i], node.Content[i+1]
+		ft, ok := fields[key.Value]
+		if !ok {
+			return fmt.Errorf("line %d: field %s not found in type %s", key.Line, key.Value, t.String())
+		}
+		if err := checkKnownFields(val, ft); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Load reads and parses a rampart config file
 func Load(configPath string) (Config, error) {
 	data, err := os.ReadFile(configPath)
@@ -292,7 +342,11 @@ func Load(configPath string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	// An empty file yields io.EOF and means "no configuration", matching the
+	// previous yaml.Unmarshal behavior.
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, fmt.Errorf("failed to parse config: %w", err)
 	}
 
@@ -301,6 +355,16 @@ func Load(configPath string) (Config, error) {
 	}
 	if cfg.Rules.RequiredChecks == nil {
 		cfg.Rules.RequiredChecks = []string{}
+	}
+
+	// Reject malformed globs up front: matchesRepo treats a bad pattern as a
+	// non-match, which would silently drop the intended exception.
+	for i, o := range cfg.Overrides {
+		for _, pattern := range o.Repos {
+			if _, err := path.Match(pattern, ""); err != nil {
+				return Config{}, fmt.Errorf("invalid repo pattern %q in overrides[%d]: %w", pattern, i, err)
+			}
+		}
 	}
 
 	return cfg, nil
