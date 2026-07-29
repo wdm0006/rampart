@@ -2,9 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -838,5 +841,206 @@ func TestCompare(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// writeTempConfig writes content to a temp config file and returns its path.
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	dPath := filepath.Join(t.TempDir(), "rampart.yaml")
+	if err := os.WriteFile(dPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dPath
+}
+
+func TestLoad_RejectsUnknownFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		// wantErr is a substring the error must name so the operator can find
+		// the offending key.
+		wantErr string
+	}{
+		{
+			name: "top_level",
+			content: `
+branch: main
+allow_stricter_rule: true
+`,
+			wantErr: "allow_stricter_rule",
+		},
+		{
+			name: "base_rule",
+			content: `
+rules:
+  require_pull_request: true
+  enforce_admin: true
+`,
+			wantErr: "enforce_admin",
+		},
+		{
+			name: "base_restriction",
+			content: `
+rules:
+  restrictions:
+    users: [wdm0006]
+    team: [platform]
+`,
+			wantErr: "team",
+		},
+		{
+			name: "override",
+			content: `
+overrides:
+  - repo: ["prod-*"]
+    rules:
+      required_approvals: 3
+`,
+			wantErr: "repo",
+		},
+		{
+			name: "override_rule",
+			content: `
+overrides:
+  - repos: ["prod-*"]
+    rules:
+      enforce_admins: true
+      dismiss_stale_review: true
+`,
+			wantErr: "dismiss_stale_review",
+		},
+		{
+			name: "override_restriction",
+			content: `
+overrides:
+  - repos: ["prod-*"]
+    rules:
+      restrictions:
+        users: [wdm0006]
+        app: [renovate]
+`,
+			wantErr: "app",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tt.content))
+			if err == nil {
+				t.Fatal("expected Load to reject the unknown field, got nil error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not name the unknown field %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsInvalidOverridePattern(t *testing.T) {
+	patterns := []string{"[", "prod-[a-", "infra-*[", `bad\`}
+
+	for _, pattern := range patterns {
+		t.Run(pattern, func(t *testing.T) {
+			content := fmt.Sprintf(`
+rules:
+  require_pull_request: true
+overrides:
+  - repos: ["ok-*", %q]
+    rules:
+      required_approvals: 3
+`, pattern)
+			_, err := Load(writeTempConfig(t, content))
+			if err == nil {
+				t.Fatal("expected Load to reject the malformed glob, got nil error")
+			}
+			if !strings.Contains(err.Error(), pattern) {
+				t.Errorf("error %q does not name the invalid pattern %q", err, pattern)
+			}
+		})
+	}
+}
+
+func TestLoad_ValidConfigStillLoads(t *testing.T) {
+	content := `
+branch: main
+allow_stricter_rules: true
+rules:
+  require_pull_request: true
+  required_approvals: 2
+  dismiss_stale_reviews: true
+  require_code_owner_reviews: false
+  require_status_checks: true
+  strict_status_checks: true
+  required_checks: [build, test]
+  enforce_admins: true
+  allow_force_pushes: false
+  allow_deletions: false
+  required_linear_history: false
+  required_conversation_resolution: true
+  restrictions:
+    users: [wdm0006]
+    teams: []
+    apps: [renovate]
+overrides:
+  - repos: ["docs-*", "sandbox-?"]
+    rules:
+      required_approvals: 0
+      required_checks: []
+      restrictions: null
+`
+	cfg, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Branch != "main" || !cfg.AllowStricterRules {
+		t.Errorf("unexpected top level: branch=%q allow_stricter_rules=%t", cfg.Branch, cfg.AllowStricterRules)
+	}
+	if !reflect.DeepEqual(cfg.Rules.RequiredChecks, []string{"build", "test"}) {
+		t.Errorf("base required_checks=%v, want [build test]", cfg.Rules.RequiredChecks)
+	}
+	if cfg.Rules.Restrictions == nil || !reflect.DeepEqual(cfg.Rules.Restrictions.Apps, []string{"renovate"}) {
+		t.Errorf("base restrictions=%+v, want apps=[renovate]", cfg.Rules.Restrictions)
+	}
+
+	base := cfg.RulesForRepo("api")
+	if base.RequiredApprovals != 2 || !base.RequireStatusChecks || !base.RequiredConversationResolution {
+		t.Errorf("unexpected base rules for api: %+v", base)
+	}
+
+	// Explicit empty/null override fields keep their clearing semantics.
+	for _, repo := range []string{"docs-site", "sandbox-a"} {
+		rules := cfg.RulesForRepo(repo)
+		if rules.RequiredApprovals != 0 {
+			t.Errorf("%s: required_approvals=%d, want 0", repo, rules.RequiredApprovals)
+		}
+		if len(rules.RequiredChecks) != 0 {
+			t.Errorf("%s: required_checks=%v, want empty", repo, rules.RequiredChecks)
+		}
+		if rules.Restrictions != nil {
+			t.Errorf("%s: restrictions=%+v, want nil", repo, rules.Restrictions)
+		}
+		if !rules.RequireStatusChecks {
+			t.Errorf("%s: expected require_status_checks inherited from base", repo)
+		}
+	}
+
+	// A repo matching no override keeps the base allowlist.
+	if r := cfg.RulesForRepo("sandbox-long-name"); r.Restrictions == nil {
+		t.Error("expected sandbox-long-name to keep the base restrictions")
+	}
+}
+
+func TestLoad_EmptyFileUsesDefaults(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Branch != "default" {
+		t.Errorf("branch=%q, want default", cfg.Branch)
+	}
+	if cfg.Rules.RequiredChecks == nil {
+		t.Error("expected required_checks to be non-nil")
 	}
 }
