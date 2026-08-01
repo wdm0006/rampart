@@ -226,17 +226,22 @@ func intersectStrings(a, b []string) []string {
 	return out
 }
 
+// mergeStringSlice returns the union of a and b, deduplicated and in a stable
+// order: the elements of a in order, then those of b not already present.
 func mergeStringSlice(a, b []string) []string {
 	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]string, 0, len(a)+len(b))
 	for _, s := range a {
-		seen[s] = true
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
 	}
 	for _, s := range b {
-		seen[s] = true
-	}
-	result := make([]string, 0, len(seen))
-	for s := range seen {
-		result = append(result, s)
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
 	}
 	return result
 }
