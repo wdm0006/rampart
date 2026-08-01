@@ -120,6 +120,8 @@ Show detailed documentation for all `rampart.yaml` configuration options.
 
 Apply your config to any non-compliant repos.
 
+Apply creates or updates the managed `rampart` ruleset, which can only add protection. If classic branch protection or another ruleset makes a repository stricter than the config, apply still writes any fixable changes but reports the repository as failed and exits non-zero. Relax the named rules manually or set `allow_stricter_rules: true` to accept them.
+
 Options:
 - `--repo NAME` — apply to a single repo
 - `--exclude NAME` — exclude repos (repeatable)

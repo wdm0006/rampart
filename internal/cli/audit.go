@@ -11,12 +11,13 @@ import (
 
 // RepoAuditResult holds the audit result for a single repo
 type RepoAuditResult struct {
-	Repo      string
-	Branch    string
-	Compliant bool
-	Diffs     []config.RuleDiff
-	Error     string
-	Skipped   bool
+	Repo        string
+	Branch      string
+	Compliant   bool
+	Diffs       []config.RuleDiff
+	ActualRules config.Rules
+	Error       string
+	Skipped     bool
 }
 
 var (
@@ -199,10 +200,11 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 		}
 
 		results = append(results, RepoAuditResult{
-			Repo:      r.Name,
-			Branch:    branch,
-			Compliant: compliant,
-			Diffs:     diffs,
+			Repo:        r.Name,
+			Branch:      branch,
+			Compliant:   compliant,
+			Diffs:       diffs,
+			ActualRules: actual,
 		})
 	}
 
