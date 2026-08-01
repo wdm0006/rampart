@@ -288,6 +288,76 @@ func TestMergeProtective_Combined(t *testing.T) {
 	}
 }
 
+func TestMergeProtective_RequiredChecksOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []string
+		b    []string
+		want []string
+	}{
+		{
+			name: "b appended after a",
+			a:    []string{"build", "test"},
+			b:    []string{"test", "lint"},
+			want: []string{"build", "test", "lint"},
+		},
+		{
+			name: "duplicates within each input collapse",
+			a:    []string{"build", "build", "test"},
+			b:    []string{"lint", "lint", "build"},
+			want: []string{"build", "test", "lint"},
+		},
+		{
+			name: "nil a",
+			a:    nil,
+			b:    []string{"build", "test"},
+			want: []string{"build", "test"},
+		},
+		{
+			name: "nil b",
+			a:    []string{"build", "test"},
+			b:    nil,
+			want: []string{"build", "test"},
+		},
+		{
+			name: "both empty",
+			a:    nil,
+			b:    nil,
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MergeProtective(Rules{RequiredChecks: tt.a}, Rules{RequiredChecks: tt.b})
+			if m.RequiredChecks == nil {
+				t.Fatal("required_checks is nil, want non-nil")
+			}
+			if !reflect.DeepEqual(m.RequiredChecks, tt.want) {
+				t.Errorf("required_checks=%v, want %v", m.RequiredChecks, tt.want)
+			}
+		})
+	}
+}
+
+// The merged order must not depend on map iteration order, so repeated merges
+// of the same input must produce byte-identical output for diffable reports.
+func TestMergeProtective_RequiredChecksOrderIsStable(t *testing.T) {
+	a := Rules{RequiredChecks: []string{"build", "test", "lint", "vet"}}
+	b := Rules{RequiredChecks: []string{"fmt", "build"}}
+
+	first := MergeProtective(a, b).RequiredChecks
+	for i := 0; i < 500; i++ {
+		got := MergeProtective(a, b).RequiredChecks
+		if !reflect.DeepEqual(got, first) {
+			t.Fatalf("merge %d produced %v, want %v", i, got, first)
+		}
+	}
+	if want := []string{"build", "test", "lint", "vet", "fmt"}; !reflect.DeepEqual(first, want) {
+		t.Errorf("required_checks=%v, want %v", first, want)
+	}
+}
+
 func TestOverrideChecksSet(t *testing.T) {
 	content := `
 branch: default
