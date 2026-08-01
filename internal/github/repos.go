@@ -41,22 +41,17 @@ func GetCurrentUser() (string, error) {
 // ListRepos lists non-fork, non-archived repos for an owner (user or org)
 func ListRepos(owner string) ([]Repo, error) {
 	// Determine whether the owner is a user or organization so we use the
-	// correct endpoint. The users/{owner}/repos endpoint returns 200 for
-	// orgs but only lists public repos and ignores the type=owner filter,
-	// so we must explicitly use the orgs/ endpoint for organizations.
+	// correct endpoint (see reposEndpoint).
 	ownerType, err := getOwnerType(owner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up owner %s: %w", owner, err)
 	}
 
-	var endpoint string
-	if ownerType == "Organization" {
-		endpoint = fmt.Sprintf("orgs/%s/repos?per_page=100", owner)
-	} else {
-		endpoint = fmt.Sprintf("users/%s/repos?type=owner&per_page=100", owner)
-	}
+	// A failure to resolve the authenticated login is not fatal: we fall back
+	// to the public users/ endpoint rather than aborting the run.
+	currentUser, _ := GetCurrentUser()
 
-	repos, err := listReposFromEndpoint(endpoint)
+	repos, err := listReposFromEndpoint(reposEndpoint(ownerType, owner, currentUser))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list repos for %s: %w", owner, err)
 	}
@@ -70,6 +65,25 @@ func ListRepos(owner string) ([]Repo, error) {
 	}
 
 	return filtered, nil
+}
+
+// reposEndpoint picks the repository listing endpoint for an owner.
+//
+// users/{owner}/repos lists only PUBLIC repositories, and type=owner does not
+// change that, so when the owner is the authenticated user we use user/repos
+// instead — that endpoint includes private repositories. Auditing any other
+// user's account can only ever see their public repositories.
+//
+// orgs/{owner}/repos defaults to type=all and already returns private
+// repositories to authorized members.
+func reposEndpoint(ownerType, owner, currentUser string) string {
+	if ownerType == "Organization" {
+		return fmt.Sprintf("orgs/%s/repos?per_page=100", owner)
+	}
+	if currentUser != "" && strings.EqualFold(owner, currentUser) {
+		return "user/repos?affiliation=owner&per_page=100"
+	}
+	return fmt.Sprintf("users/%s/repos?type=owner&per_page=100", owner)
 }
 
 // getOwnerType returns the GitHub account type ("User" or "Organization")

@@ -110,6 +110,8 @@ Options:
 - `--config FILE` — config path (default: `rampart.yaml`)
 - `--report FILE` — write a self-contained HTML report to the given path
 
+**Repo visibility.** With `--owner` omitted (or set to your own login), rampart audits every repo you own, public and private. For an organization, it audits every repo your token can see, including private ones. Auditing *another* user's account can only ever see their **public** repos — GitHub's user-repository API exposes nothing else, regardless of token scopes.
+
 ### `rampart config`
 
 Show detailed documentation for all `rampart.yaml` configuration options.
