@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wdm0006/rampart/internal/config"
@@ -54,6 +55,7 @@ var applyCmd = &cobra.Command{
 		updated := 0
 		failed := 0
 		for _, r := range toUpdate {
+			unenforceable := config.UnenforceableRules(r.EffectiveRules, r.ActualRules)
 			if dryRun {
 				fmt.Printf("  [dry-run] %s would be updated:\n", r.Repo)
 				for _, d := range r.Diffs {
@@ -77,12 +79,14 @@ var applyCmd = &cobra.Command{
 						fmt.Printf(" failed: %s\n", err)
 						failed++
 					} else {
-						fmt.Println(" done")
-						updated++
+						updatedDelta, failedDelta := reportApplySuccess(unenforceable)
+						updated += updatedDelta
+						failed += failedDelta
 					}
 				} else {
-					fmt.Println(" done")
-					updated++
+					updatedDelta, failedDelta := reportApplySuccess(unenforceable)
+					updated += updatedDelta
+					failed += failedDelta
 				}
 			}
 		}
@@ -102,6 +106,25 @@ var applyCmd = &cobra.Command{
 
 		return applyResultError(dryRun, failed)
 	},
+}
+
+func reportApplySuccess(unenforceable []string) (updated, failed int) {
+	updated, failed = applySuccessCounts(unenforceable)
+	if len(unenforceable) == 0 {
+		fmt.Println(" done")
+		return updated, failed
+	}
+
+	fmt.Printf(" done, but cannot converge: %s are enforced outside the managed rampart ruleset (classic branch protection or another ruleset); relax them manually or set allow_stricter_rules: true\n",
+		strings.Join(unenforceable, ", "))
+	return updated, failed
+}
+
+func applySuccessCounts(unenforceable []string) (updated, failed int) {
+	if len(unenforceable) > 0 {
+		return 0, 1
+	}
+	return 1, 0
 }
 
 func shouldApply(result RepoAuditResult) bool {

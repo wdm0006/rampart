@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- Make `apply` fail explicitly when classic branch protection or another ruleset keeps a repository stricter than the configured policy, instead of reporting a successful update that cannot converge.
+
 ## v0.7.0
 
 ### Features

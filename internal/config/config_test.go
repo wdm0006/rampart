@@ -358,6 +358,92 @@ func TestMergeProtective_RequiredChecksOrderIsStable(t *testing.T) {
 	}
 }
 
+func TestUnenforceableRules(t *testing.T) {
+	tests := []struct {
+		name    string
+		desired Rules
+		actual  Rules
+		want    []string
+	}{
+		{name: "under-protected repository", desired: Rules{RequirePullRequest: true, EnforceAdmins: true}, actual: Rules{}},
+		{name: "more approvals", desired: Rules{RequirePullRequest: true, RequiredApprovals: 1}, actual: Rules{RequirePullRequest: true, RequiredApprovals: 2}, want: []string{"required_approvals"}},
+		{
+			name:    "protective true booleans",
+			desired: Rules{RequirePullRequest: true},
+			actual: Rules{
+				RequirePullRequest:    true,
+				DismissStaleReviews:   true,
+				EnforceAdmins:         true,
+				RequiredLinearHistory: true,
+			},
+			want: []string{"dismiss_stale_reviews", "enforce_admins", "required_linear_history"},
+		},
+		{
+			name:    "protective false allow booleans",
+			desired: Rules{AllowForcePushes: true, AllowDeletions: true},
+			actual:  Rules{},
+			want:    []string{"allow_force_pushes", "allow_deletions"},
+		},
+		{
+			name:    "extra required check",
+			desired: Rules{RequireStatusChecks: true, RequiredChecks: []string{"build"}},
+			actual:  Rules{RequireStatusChecks: true, RequiredChecks: []string{"build", "lint"}},
+			want:    []string{"required_checks"},
+		},
+		{
+			name: "all remaining protective booleans",
+			actual: Rules{
+				RequirePullRequest:             true,
+				RequireCodeOwnerReviews:        true,
+				RequireStatusChecks:            true,
+				StrictStatusChecks:             true,
+				RequiredConversationResolution: true,
+			},
+			want: []string{"require_pull_request", "require_status_checks", "required_conversation_resolution"},
+		},
+		{
+			name:    "nested pull request and status rules",
+			desired: Rules{RequirePullRequest: true, RequireStatusChecks: true},
+			actual: Rules{
+				RequirePullRequest:      true,
+				RequireCodeOwnerReviews: true,
+				RequireStatusChecks:     true,
+				StrictStatusChecks:      true,
+			},
+			want: []string{"require_code_owner_reviews", "strict_status_checks"},
+		},
+		{name: "equal", desired: Rules{RequirePullRequest: true, RequiredApprovals: 1}, actual: Rules{RequirePullRequest: true, RequiredApprovals: 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := UnenforceableRules(tt.desired, tt.actual); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("UnenforceableRules() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnenforceableRulesAfterManagedRulesetWrite(t *testing.T) {
+	desired := Rules{RequirePullRequest: true, RequiredApprovals: 1}
+	classic := Rules{RequiredApprovals: 2, DismissStaleReviews: true}
+	actual := MergeProtective(classic, desired)
+
+	var failing []string
+	for _, diff := range Compare(desired, actual, false) {
+		if !diff.Pass {
+			failing = append(failing, diff.Rule)
+		}
+	}
+	want := []string{"required_approvals", "dismiss_stale_reviews"}
+	if !reflect.DeepEqual(failing, want) {
+		t.Fatalf("failing rules after managed ruleset write = %v, want %v", failing, want)
+	}
+	if got := UnenforceableRules(desired, actual); !reflect.DeepEqual(got, want) {
+		t.Errorf("UnenforceableRules() = %v, want %v", got, want)
+	}
+}
+
 func TestOverrideChecksSet(t *testing.T) {
 	content := `
 branch: default

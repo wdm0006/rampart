@@ -688,6 +688,21 @@ func Compare(desired, actual Rules, allowStricter bool) []RuleDiff {
 	return diffs
 }
 
+// UnenforceableRules returns exact-match failures caused by protection that is
+// stricter than desired. Writing an additional ruleset cannot relax these rules.
+func UnenforceableRules(desired, actual Rules) []string {
+	exactDiffs := Compare(desired, actual, false)
+	stricterDiffs := Compare(desired, actual, true)
+
+	var rules []string
+	for i, exact := range exactDiffs {
+		if exact.Rule != "restrictions" && !exact.Pass && stricterDiffs[i].Pass {
+			rules = append(rules, exact.Rule)
+		}
+	}
+	return rules
+}
+
 func formatRestrictions(r *Restrictions) string {
 	if r == nil {
 		return "<none>"
