@@ -1,10 +1,20 @@
 # Changelog
 
-## Unreleased
+## v0.8.0
+
+### Features
+
+- Reject unknown configuration keys and malformed repository override globs instead of silently ignoring policy mistakes.
 
 ### Bug Fixes
 
+- Audit private repositories owned by the authenticated user instead of silently limiting user-owned fleet audits to public repositories.
+- Fail audits when effective rulesets or contributing ruleset details cannot be read, preventing partial GitHub state from being reported as compliant.
+- Correctly audit `enforce_admins` when protection comes from repository rulesets.
+- Paginate managed ruleset lookup so `apply` updates an existing `rampart` ruleset even when it is not on the first API page.
+- Return a failing exit status when repository updates fail.
 - Make `apply` fail explicitly when classic branch protection or another ruleset keeps a repository stricter than the configured policy, instead of reporting a successful update that cannot converge.
+- Keep merged required-check ordering deterministic so unchanged audits and HTML reports produce stable output.
 
 ## v0.7.0
 
