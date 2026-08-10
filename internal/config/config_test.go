@@ -1188,6 +1188,25 @@ overrides:
 	}
 }
 
+func TestLoad_RejectsMultipleDocuments(t *testing.T) {
+	content := `
+branch: default
+rules:
+  require_pull_request: true
+---
+rules:
+  required_approvals: 2
+  enforce_admins: true
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil {
+		t.Fatal("expected Load to reject multiple YAML documents, got nil error")
+	}
+	if !strings.Contains(err.Error(), "multiple YAML documents are unsupported") {
+		t.Errorf("error %q does not explain that multiple documents are unsupported", err)
+	}
+}
+
 func TestLoad_EmptyFileUsesDefaults(t *testing.T) {
 	cfg, err := Load(writeTempConfig(t, ""))
 	if err != nil {
