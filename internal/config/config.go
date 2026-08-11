@@ -355,6 +355,13 @@ func Load(configPath string) (Config, error) {
 		return Config{}, fmt.Errorf("failed to parse config: %w", err)
 	}
 
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err == nil {
+		return Config{}, fmt.Errorf("failed to parse config: multiple YAML documents are unsupported")
+	} else if !errors.Is(err, io.EOF) {
+		return Config{}, fmt.Errorf("failed to parse config: %w", err)
+	}
+
 	if cfg.Branch == "" {
 		cfg.Branch = "default"
 	}
