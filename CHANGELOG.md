@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.1
+
+### Bug Fixes
+
+- Reject configuration files that contain multiple YAML documents instead of silently ignoring policy defined after the first document.
+
 ## v0.8.0
 
 ### Features
