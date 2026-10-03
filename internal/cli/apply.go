@@ -36,24 +36,33 @@ var applyCmd = &cobra.Command{
 			EffectiveRules config.Rules
 		}
 		var toUpdate []repoUpdate
-		for _, r := range results {
-			if shouldApply(r) {
-				toUpdate = append(toUpdate, repoUpdate{
-					RepoAuditResult: r,
-					EffectiveRules:  cfg.RulesForRepo(r.Repo),
-				})
-			}
+		classified := classifyApplyResults(results)
+		for _, r := range classified.Eligible {
+			toUpdate = append(toUpdate, repoUpdate{
+				RepoAuditResult: r,
+				EffectiveRules:  cfg.RulesForRepo(r.Repo),
+			})
 		}
 
-		if len(toUpdate) == 0 {
+		readErrors := len(classified.ReadErrors)
+		if len(toUpdate) == 0 && readErrors == 0 {
 			fmt.Println("\nAll repos are compliant. Nothing to apply.")
 			return nil
 		}
 
-		fmt.Printf("\n%d repo(s) to update:\n\n", len(toUpdate))
+		if readErrors > 0 {
+			fmt.Printf("\n%d repo(s) could not be read and will not be updated:\n", readErrors)
+			for _, r := range classified.ReadErrors {
+				fmt.Printf("  %s: read failed: %s\n", r.Repo, r.Error)
+			}
+		}
+
+		if len(toUpdate) > 0 {
+			fmt.Printf("\n%d repo(s) to update:\n\n", len(toUpdate))
+		}
 
 		updated := 0
-		failed := 0
+		failed := readErrors
 		for _, r := range toUpdate {
 			unenforceable := config.UnenforceableRules(r.EffectiveRules, r.ActualRules)
 			if dryRun {
@@ -95,13 +104,11 @@ var applyCmd = &cobra.Command{
 		if dryRun {
 			fmt.Printf("Dry run complete: %d repo(s) would be updated\n", len(toUpdate))
 		} else {
-			skipped := 0
-			for _, r := range results {
-				if r.Skipped {
-					skipped++
-				}
-			}
-			fmt.Printf("Results: %d updated, %d failed, %d skipped\n", updated, failed, skipped)
+			fmt.Printf("Results: %d updated, %d failed, %d skipped\n", updated, failed, classified.Skipped)
+		}
+
+		if dryRun && readErrors > 0 {
+			return applyResultError(false, readErrors)
 		}
 
 		return applyResultError(dryRun, failed)
@@ -129,6 +136,27 @@ func applySuccessCounts(unenforceable []string) (updated, failed int) {
 
 func shouldApply(result RepoAuditResult) bool {
 	return !result.Compliant && !result.Skipped && result.Error == ""
+}
+
+type applyClassification struct {
+	Eligible   []RepoAuditResult
+	ReadErrors []RepoAuditResult
+	Skipped    int
+}
+
+func classifyApplyResults(results []RepoAuditResult) applyClassification {
+	var c applyClassification
+	for _, r := range results {
+		switch {
+		case r.Skipped:
+			c.Skipped++
+		case r.Error != "":
+			c.ReadErrors = append(c.ReadErrors, r)
+		case shouldApply(r):
+			c.Eligible = append(c.Eligible, r)
+		}
+	}
+	return c
 }
 
 func applyResultError(dryRun bool, failed int) error {
