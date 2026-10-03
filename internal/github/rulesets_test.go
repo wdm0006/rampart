@@ -292,6 +292,16 @@ func TestRulesFromBranchRules(t *testing.T) {
 			},
 		},
 		{
+			name:  "required_status_checks without parameters only enables checks",
+			input: []branchRule{{Type: "required_status_checks"}},
+			want: config.Rules{
+				RequireStatusChecks: true,
+				RequiredChecks:      []string{},
+				AllowForcePushes:    true,
+				AllowDeletions:      true,
+			},
+		},
+		{
 			name: "non_fast_forward deletion and required_linear_history flip fields",
 			input: []branchRule{
 				{Type: "non_fast_forward"},
@@ -309,9 +319,59 @@ func TestRulesFromBranchRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := rulesFromBranchRules(tt.input)
+			got, err := rulesFromBranchRules(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("rulesFromBranchRules() mismatch\n got: %+v\nwant: %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMalformedBranchRuleParameters(t *testing.T) {
+	tests := []struct {
+		ruleType string
+		params   string
+	}{
+		{"pull_request", `"malformed"`},
+		{"pull_request", `{"required_approving_review_count":"two"}`},
+		{"required_status_checks", `"malformed"`},
+		{"required_status_checks", `{"required_status_checks":[{"context":42}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ruleType+"/"+tt.params, func(t *testing.T) {
+			input := []branchRule{
+				pr(t, pullRequestParams{RequiredApprovingReviewCount: 2}),
+				{Type: tt.ruleType, Parameters: json.RawMessage(tt.params), RulesetID: 42},
+			}
+			got, err := rulesFromBranchRules(input)
+			if err == nil || !strings.Contains(err.Error(), tt.ruleType) {
+				t.Fatalf("error = %v, want error naming %s", err, tt.ruleType)
+			}
+			if !reflect.DeepEqual(got, config.Rules{}) {
+				t.Errorf("returned partial rules: %#v", got)
+			}
+
+			output, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			run := func(_ string, _ ...string) ([]byte, error) {
+				calls++
+				return output, nil
+			}
+			got, err = getBranchRules("acme", "widget", "main", run)
+			if err == nil || !strings.Contains(err.Error(), tt.ruleType) {
+				t.Fatalf("repository read error = %v, want error naming %s", err, tt.ruleType)
+			}
+			if !reflect.DeepEqual(got, config.Rules{}) {
+				t.Errorf("repository read returned partial rules: %#v", got)
+			}
+			if calls != 1 {
+				t.Errorf("command calls = %d, want 1", calls)
 			}
 		})
 	}

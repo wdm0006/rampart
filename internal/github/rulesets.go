@@ -81,7 +81,10 @@ func getBranchRules(owner, repo, branch string, run commandRunner) (config.Rules
 		return config.NoProtectionRules(), nil
 	}
 
-	r := rulesFromBranchRules(rules)
+	r, err := rulesFromBranchRules(rules)
+	if err != nil {
+		return config.Rules{}, err
+	}
 	rulesetIDs := make([]int, 0)
 	for _, rule := range rules {
 		if rule.RulesetID == 0 {
@@ -143,7 +146,7 @@ func enforceAdminsFromBypassActors(actors []bypassActor) bool {
 // rulesFromBranchRules converts the effective branch rules API response into
 // a Rules struct. When multiple rules of the same type exist (from different
 // rulesets), the most restrictive value is used for each field.
-func rulesFromBranchRules(branchRules []branchRule) config.Rules {
+func rulesFromBranchRules(branchRules []branchRule) (config.Rules, error) {
 	r := config.Rules{
 		RequiredChecks:   []string{},
 		AllowForcePushes: true,
@@ -156,24 +159,26 @@ func rulesFromBranchRules(branchRules []branchRule) config.Rules {
 			r.RequirePullRequest = true
 			if rule.Parameters != nil {
 				var params pullRequestParams
-				if err := json.Unmarshal(rule.Parameters, &params); err == nil {
-					if params.RequiredApprovingReviewCount > r.RequiredApprovals {
-						r.RequiredApprovals = params.RequiredApprovingReviewCount
-					}
-					r.DismissStaleReviews = r.DismissStaleReviews || params.DismissStaleReviewsOnPush
-					r.RequireCodeOwnerReviews = r.RequireCodeOwnerReviews || params.RequireCodeOwnerReview
-					r.RequiredConversationResolution = r.RequiredConversationResolution || params.RequiredReviewThreadResolution
+				if err := json.Unmarshal(rule.Parameters, &params); err != nil {
+					return config.Rules{}, fmt.Errorf("failed to parse %s parameters: %w", rule.Type, err)
 				}
+				if params.RequiredApprovingReviewCount > r.RequiredApprovals {
+					r.RequiredApprovals = params.RequiredApprovingReviewCount
+				}
+				r.DismissStaleReviews = r.DismissStaleReviews || params.DismissStaleReviewsOnPush
+				r.RequireCodeOwnerReviews = r.RequireCodeOwnerReviews || params.RequireCodeOwnerReview
+				r.RequiredConversationResolution = r.RequiredConversationResolution || params.RequiredReviewThreadResolution
 			}
 		case "required_status_checks":
 			r.RequireStatusChecks = true
 			if rule.Parameters != nil {
 				var params statusCheckParams
-				if err := json.Unmarshal(rule.Parameters, &params); err == nil {
-					r.StrictStatusChecks = r.StrictStatusChecks || params.StrictRequiredStatusChecksPolicy
-					for _, check := range params.RequiredStatusChecks {
-						r.RequiredChecks = append(r.RequiredChecks, check.Context)
-					}
+				if err := json.Unmarshal(rule.Parameters, &params); err != nil {
+					return config.Rules{}, fmt.Errorf("failed to parse %s parameters: %w", rule.Type, err)
+				}
+				r.StrictStatusChecks = r.StrictStatusChecks || params.StrictRequiredStatusChecksPolicy
+				for _, check := range params.RequiredStatusChecks {
+					r.RequiredChecks = append(r.RequiredChecks, check.Context)
 				}
 			}
 		case "non_fast_forward":
@@ -188,7 +193,7 @@ func rulesFromBranchRules(branchRules []branchRule) config.Rules {
 	// Deduplicate required checks
 	r.RequiredChecks = dedup(r.RequiredChecks)
 
-	return r
+	return r, nil
 }
 
 func dedup(ss []string) []string {
