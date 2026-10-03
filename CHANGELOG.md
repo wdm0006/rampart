@@ -5,6 +5,8 @@
 ### Bug Fixes
 
 - Reject configuration files that contain multiple YAML documents instead of silently ignoring policy defined after the first document.
+- Fail closed when an effective branch rule's parameters cannot be parsed, instead of silently dropping the rule's settings and reporting weaker protection than GitHub enforces.
+- Count repositories that could not be read during `apply` as failures, so the command exits non-zero (including in dry-run) rather than reporting "all repos are compliant".
 
 ## v0.8.0
 
