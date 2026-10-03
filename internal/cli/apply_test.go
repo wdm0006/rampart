@@ -51,6 +51,54 @@ func TestShouldApply(t *testing.T) {
 	}
 }
 
+func TestClassifyApplyResults(t *testing.T) {
+	compliant := RepoAuditResult{Repo: "ok", Compliant: true}
+	drift := RepoAuditResult{Repo: "drift"}
+	broken := RepoAuditResult{Repo: "broken", Error: "ruleset state unavailable"}
+	excluded := RepoAuditResult{Repo: "excluded", Skipped: true}
+	skippedWithError := RepoAuditResult{Repo: "noperm", Skipped: true, Error: "insufficient permissions"}
+
+	tests := []struct {
+		name         string
+		results      []RepoAuditResult
+		wantEligible []string
+		wantErrors   []string
+		wantSkipped  int
+		wantFailed   bool
+	}{
+		{name: "all compliant", results: []RepoAuditResult{compliant, compliant}},
+		{name: "all read errors", results: []RepoAuditResult{broken, broken}, wantErrors: []string{"broken", "broken"}, wantFailed: true},
+		{name: "mixed", results: []RepoAuditResult{drift, broken, compliant}, wantEligible: []string{"drift"}, wantErrors: []string{"broken"}, wantFailed: true},
+		{name: "skipped are not failures", results: []RepoAuditResult{excluded, skippedWithError, compliant}, wantSkipped: 2},
+	}
+
+	names := func(rs []RepoAuditResult) []string {
+		var out []string
+		for _, r := range rs {
+			out = append(out, r.Repo)
+		}
+		return out
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyApplyResults(tt.results)
+			if g := names(got.Eligible); strings.Join(g, ",") != strings.Join(tt.wantEligible, ",") {
+				t.Errorf("Eligible = %v, want %v", g, tt.wantEligible)
+			}
+			if g := names(got.ReadErrors); strings.Join(g, ",") != strings.Join(tt.wantErrors, ",") {
+				t.Errorf("ReadErrors = %v, want %v", g, tt.wantErrors)
+			}
+			if got.Skipped != tt.wantSkipped {
+				t.Errorf("Skipped = %d, want %d", got.Skipped, tt.wantSkipped)
+			}
+			if err := applyResultError(false, len(got.ReadErrors)); (err != nil) != tt.wantFailed {
+				t.Errorf("exit error = %v, want failure %v", err, tt.wantFailed)
+			}
+		})
+	}
+}
+
 func TestReportApplySuccess(t *testing.T) {
 	tests := []struct {
 		name          string
