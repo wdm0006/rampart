@@ -109,6 +109,7 @@ Options:
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
 - `--report FILE` — write a self-contained HTML report to the given path
+- `--format text|json` — output format (default `text`); `json` is written to stdout, progress lines go to stderr
 
 **Repo visibility.** With `--owner` omitted (or set to your own login), rampart audits every repo you own, public and private. For an organization, it audits every repo your token can see, including private ones. Auditing *another* user's account can only ever see their **public** repos — GitHub's user-repository API exposes nothing else, regardless of token scopes.
 
@@ -149,5 +150,36 @@ All GitHub API calls go through the `gh` CLI, so authentication is handled by yo
 ```
 
 The `audit` command exits non-zero when any repos are non-compliant, making it easy to use as a CI check.
+
+For machine-readable results, use `--format json`:
+
+```yaml
+- name: Audit branch protection
+  run: rampart audit --owner myorg --format json > audit.json
+```
+
+Schema (stable key order; repos appear in audit order, diffs in check order; exit codes are unchanged):
+
+```json
+{
+  "owner": "myorg",
+  "config": "rampart.yaml",
+  "branch": "default",
+  "summary": {"compliant": 1, "non_compliant": 2, "skipped": 1, "total": 4},
+  "repos": [
+    {
+      "repo": "api",
+      "branch": "main",
+      "status": "non_compliant",
+      "error": "",
+      "diffs": [{"rule": "required_approvals", "pass": false, "want": "2", "got": "1"}]
+    }
+  ]
+}
+```
+
+- `status` is one of `compliant`, `non_compliant`, `skipped`, `error`. `error` is empty unless the repo was skipped or errored; `diffs` is `[]` when no checks ran.
+- `summary` uses the same counts as the terminal and HTML summaries: errored repos count as `non_compliant`, and `total` includes skipped repos.
+- An invalid `--format` value is rejected before any GitHub call.
 
 For a scheduled drift check that publishes the HTML report as an artifact, see [docs/ci-drift.md](docs/ci-drift.md) and [examples/rampart-drift.yml](examples/rampart-drift.yml).
