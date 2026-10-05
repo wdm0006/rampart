@@ -149,3 +149,5 @@ All GitHub API calls go through the `gh` CLI, so authentication is handled by yo
 ```
 
 The `audit` command exits non-zero when any repos are non-compliant, making it easy to use as a CI check.
+
+For a scheduled drift check that publishes the HTML report as an artifact, see [docs/ci-drift.md](docs/ci-drift.md) and [examples/rampart-drift.yml](examples/rampart-drift.yml).
