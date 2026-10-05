@@ -16,7 +16,7 @@ The workflow's built-in `GITHUB_TOKEN` is scoped to the repository running the w
 The token owner needs admin access to every repo in scope; GitHub only returns branch protection to admins.
 
 - **Fine-grained PAT:** repository access to the repos in scope, with `Administration: Read-only` and `Metadata: Read-only`. For an organization, the org must allow fine-grained tokens.
-- **Classic PAT:** the `repo` scope (and `read:org` for private org membership if needed).
+- **Classic PAT:** the `repo` scope.
 
 Use a read-only token for this workflow. `audit` never writes. Keep any token that can run `apply` out of the scheduled job.
 
