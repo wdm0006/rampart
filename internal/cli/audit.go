@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,10 @@ type RepoAuditResult struct {
 	Skipped     bool
 }
 
+// progressOut receives the "Fetching"/"Auditing" progress lines; audit
+// --format json redirects it to stderr so stdout stays valid JSON.
+var progressOut io.Writer = os.Stdout
+
 var (
 	getBranchProtection = github.GetBranchProtection
 	getBranchRules      = github.GetBranchRules
@@ -35,6 +40,14 @@ var auditCmd = &cobra.Command{
 		exclude, _ := cmd.Flags().GetStringSlice("exclude")
 		configPath, _ := cmd.Flags().GetString("config")
 		reportPath, _ := cmd.Flags().GetString("report")
+		format, _ := cmd.Flags().GetString("format")
+
+		if err := validateFormat(format); err != nil {
+			exitWithError(err.Error())
+		}
+		if format == formatJSON {
+			progressOut = os.Stderr
+		}
 
 		if owner == "" {
 			// Default to current user
@@ -46,6 +59,23 @@ var auditCmd = &cobra.Command{
 		}
 
 		results, cfg := auditRepos(owner, repo, configPath, exclude)
+
+		if format == formatJSON {
+			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results)); err != nil {
+				exitWithError(err.Error())
+			}
+			if reportPath != "" {
+				data := newReportData(owner, configPath, cfg.Branch, results)
+				if err := generateReport(reportPath, data); err != nil {
+					exitWithError(err.Error())
+				}
+				fmt.Fprintf(os.Stderr, "Report written to %s\n", reportPath)
+			}
+			if newReportData(owner, configPath, cfg.Branch, results).NonCompliant > 0 {
+				os.Exit(1)
+			}
+			return
+		}
 
 		// Print results
 		nonCompliant := 0
@@ -104,6 +134,7 @@ func init() {
 	auditCmd.Flags().String("repo", "", "Audit a single repo instead of all repos")
 	auditCmd.Flags().StringSlice("exclude", nil, "Repos to exclude (repeatable)")
 	auditCmd.Flags().String("config", "rampart.yaml", "Path to config file")
+	auditCmd.Flags().String("format", formatText, "Output format: text or json (json goes to stdout)")
 	auditCmd.Flags().String("report", "", "Write an HTML report to the given file path")
 }
 
@@ -126,7 +157,7 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 			repos = []github.Repo{{Name: repo}}
 		}
 	} else {
-		fmt.Printf("Fetching repos for %s...\n", owner)
+		fmt.Fprintf(progressOut, "Fetching repos for %s...\n", owner)
 		repos, err = github.ListRepos(owner)
 		if err != nil {
 			exitWithError(err.Error())
@@ -138,7 +169,7 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 		excludeSet[e] = true
 	}
 
-	fmt.Printf("Auditing %d repos against %s (branch: %s)\n\n", len(repos), configPath, cfg.Branch)
+	fmt.Fprintf(progressOut, "Auditing %d repos against %s (branch: %s)\n\n", len(repos), configPath, cfg.Branch)
 
 	var results []RepoAuditResult
 	for _, r := range repos {
