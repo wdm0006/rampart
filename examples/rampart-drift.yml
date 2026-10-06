@@ -1,0 +1,51 @@
+# Scheduled Rampart drift check. See docs/ci-drift.md.
+# Copy to .github/workflows/rampart-drift.yml in the repo that holds rampart.yaml.
+name: Rampart drift check
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rampart-drift
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install rampart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo wdm0006/rampart --json tagName --jq .tagName)"
+          archive="rampart_${tag#v}_linux_amd64.tar.gz"
+          gh release download "$tag" --repo wdm0006/rampart \
+            --pattern "$archive" --pattern checksums.txt
+          grep " ${archive}\$" checksums.txt | sha256sum --check -
+          tar -xzf "$archive" rampart
+          sudo install -m 0755 rampart /usr/local/bin/rampart
+          rampart --version
+
+      - name: Audit branch protection
+        env:
+          GH_TOKEN: ${{ secrets.RAMPART_TOKEN }}
+          OWNER: myorg
+        run: rampart audit --owner "$OWNER" --config rampart.yaml --report rampart-report.html
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rampart-report
+          path: rampart-report.html
+          if-no-files-found: warn
+          retention-days: 30

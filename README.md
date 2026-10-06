@@ -181,3 +181,5 @@ Schema (stable key order; repos appear in audit order, diffs in check order; exi
 - `status` is one of `compliant`, `non_compliant`, `skipped`, `error`. `error` is empty unless the repo was skipped or errored; `diffs` is `[]` when no checks ran.
 - `summary` uses the same counts as the terminal and HTML summaries: errored repos count as `non_compliant`, and `total` includes skipped repos.
 - An invalid `--format` value is rejected before any GitHub call.
+
+For a scheduled drift check that publishes the HTML report as an artifact, see [docs/ci-drift.md](docs/ci-drift.md) and [examples/rampart-drift.yml](examples/rampart-drift.yml).
