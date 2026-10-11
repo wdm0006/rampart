@@ -59,6 +59,7 @@ var auditCmd = &cobra.Command{
 		}
 
 		results, cfg := auditRepos(owner, repo, configPath, exclude)
+		appendStepSummary(owner, results, os.Stderr)
 
 		if format == formatJSON {
 			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results)); err != nil {
