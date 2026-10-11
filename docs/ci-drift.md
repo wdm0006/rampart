@@ -29,6 +29,7 @@ Secrets are not available to workflows triggered from forks, so a fork's runs ca
 - `permissions: contents: read` only; the audit authenticates with `RAMPART_TOKEN`, not the job token.
 - Installs the latest release archive for Linux amd64 with `gh release download` (preinstalled `gh` on `ubuntu-latest`) and verifies it against `checksums.txt`. Pin `tag` to a version to make runs reproducible.
 - Runs `rampart audit --report rampart-report.html`.
+- Automatically appends audit counts and a table of failing rules/read errors to the Actions job summary when `GITHUB_STEP_SUMMARY` is set. The table shows at most 50 rows, followed by a `+N more rows` line; download the HTML report for full details. This works with both text and JSON output, keeps JSON stdout pure, and only warns on stderr if the summary cannot be written. Outside Actions, no summary is written unless that environment variable is set.
 - Uploads the report with `if: always()`, so it is available when the audit fails, which is when you need it. `if-no-files-found: warn` covers failures before the report is written (for example a bad config).
 - Linux runner only; macOS and Windows runners bill at a higher rate and add nothing here.
 
@@ -39,7 +40,7 @@ Secrets are not available to workflows triggered from forks, so a fork's runs ca
 | `0` | Every audited repo is compliant (skipped repos do not count). |
 | `1` | At least one repo is non-compliant or could not be read, or the command itself failed (bad config, unknown flag). |
 
-The job log and report distinguish drift from read errors; the exit code does not.
+The job summary, log and report distinguish drift from read errors; the exit code does not.
 
 ## Read-only audit, manual remediation
 
