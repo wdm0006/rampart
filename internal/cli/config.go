@@ -17,6 +17,11 @@ rulesets API. During audit, both sources are checked and the most
 restrictive combination is used for comparison. During apply, rampart
 creates or updates a repository ruleset named "rampart".
 
+Both commands read repos in parallel; --concurrency N (default 4, minimum
+1, 1 = serial) bounds how many repos are read at once. Results always
+appear in repo-list order. Keep N low on large fleets to stay under
+GitHub rate limits.
+
 TOP-LEVEL OPTIONS
 =================
 

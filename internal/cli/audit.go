@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/wdm0006/rampart/internal/config"
@@ -25,6 +26,8 @@ type RepoAuditResult struct {
 // --format json redirects it to stderr so stdout stays valid JSON.
 var progressOut io.Writer = os.Stdout
 
+const defaultConcurrency = 4
+
 var (
 	getBranchProtection = github.GetBranchProtection
 	getBranchRules      = github.GetBranchRules
@@ -41,7 +44,11 @@ var auditCmd = &cobra.Command{
 		configPath, _ := cmd.Flags().GetString("config")
 		reportPath, _ := cmd.Flags().GetString("report")
 		format, _ := cmd.Flags().GetString("format")
+		concurrency, _ := cmd.Flags().GetInt("concurrency")
 
+		if err := validateConcurrency(concurrency); err != nil {
+			exitWithError(err.Error())
+		}
 		if err := validateFormat(format); err != nil {
 			exitWithError(err.Error())
 		}
@@ -58,7 +65,7 @@ var auditCmd = &cobra.Command{
 			owner = user
 		}
 
-		results, cfg := auditRepos(owner, repo, configPath, exclude)
+		results, cfg := auditRepos(owner, repo, configPath, exclude, concurrency)
 		appendStepSummary(owner, results, os.Stderr)
 
 		if format == formatJSON {
@@ -136,11 +143,12 @@ func init() {
 	auditCmd.Flags().StringSlice("exclude", nil, "Repos to exclude (repeatable)")
 	auditCmd.Flags().String("config", "rampart.yaml", "Path to config file")
 	auditCmd.Flags().String("format", formatText, "Output format: text or json (json goes to stdout)")
+	auditCmd.Flags().Int("concurrency", defaultConcurrency, "Number of repos to read in parallel (1 = serial)")
 	auditCmd.Flags().String("report", "", "Write an HTML report to the given file path")
 }
 
 // auditRepos is the shared audit engine used by both audit and apply commands
-func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditResult, config.Config) {
+func auditRepos(owner, repo, configPath string, exclude []string, concurrency int) ([]RepoAuditResult, config.Config) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		exitWithError(err.Error())
@@ -172,73 +180,91 @@ func auditRepos(owner, repo, configPath string, exclude []string) ([]RepoAuditRe
 
 	fmt.Fprintf(progressOut, "Auditing %d repos against %s (branch: %s)\n\n", len(repos), configPath, cfg.Branch)
 
-	var results []RepoAuditResult
-	for _, r := range repos {
-		if excludeSet[r.Name] {
-			results = append(results, RepoAuditResult{
-				Repo:    r.Name,
-				Skipped: true,
-				Error:   "excluded",
-			})
-			continue
-		}
+	return auditAll(owner, repos, cfg, excludeSet, concurrency), cfg
+}
 
-		branch := cfg.Branch
-		if branch == "default" {
-			branch = r.DefaultBranch
-		}
-
-		// Get classic branch protection rules
-		classicRules, ok, err := getBranchProtection(owner, r.Name, branch)
-		if err != nil {
-			results = append(results, RepoAuditResult{
-				Repo:  r.Name,
-				Error: err.Error(),
-			})
-			continue
-		}
-		if !ok {
-			results = append(results, RepoAuditResult{
-				Repo:    r.Name,
-				Skipped: true,
-				Error:   "insufficient permissions",
-			})
-			continue
-		}
-
-		// Get ruleset-based rules
-		rulesetRules, err := getBranchRules(owner, r.Name, branch)
-		if err != nil {
-			results = append(results, RepoAuditResult{
-				Repo:   r.Name,
-				Branch: branch,
-				Error:  err.Error(),
-			})
-			continue
-		}
-
-		// Merge: the effective protection is the most restrictive
-		// combination of classic protection and rulesets
-		actual := config.MergeProtective(classicRules, rulesetRules)
-
-		effectiveRules := cfg.RulesForRepo(r.Name)
-		diffs := config.Compare(effectiveRules, actual, cfg.AllowStricterRules)
-		compliant := true
-		for _, d := range diffs {
-			if !d.Pass {
-				compliant = false
-				break
+// auditAll audits repos with at most concurrency reads in flight. Results are
+// placed by input index so output order matches the repo list for any value.
+func auditAll(owner string, repos []github.Repo, cfg config.Config, excludeSet map[string]bool, concurrency int) []RepoAuditResult {
+	results := make([]RepoAuditResult, len(repos))
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(repos) {
+		concurrency = len(repos)
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				results[i] = auditOne(owner, repos[i], cfg, excludeSet)
 			}
-		}
+		}()
+	}
+	for i := range repos {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
 
-		results = append(results, RepoAuditResult{
-			Repo:        r.Name,
-			Branch:      branch,
-			Compliant:   compliant,
-			Diffs:       diffs,
-			ActualRules: actual,
-		})
+// auditOne reads and compares a single repo.
+func auditOne(owner string, r github.Repo, cfg config.Config, excludeSet map[string]bool) RepoAuditResult {
+	if excludeSet[r.Name] {
+		return RepoAuditResult{Repo: r.Name, Skipped: true, Error: "excluded"}
 	}
 
-	return results, cfg
+	branch := cfg.Branch
+	if branch == "default" {
+		branch = r.DefaultBranch
+	}
+
+	// Get classic branch protection rules
+	classicRules, ok, err := getBranchProtection(owner, r.Name, branch)
+	if err != nil {
+		return RepoAuditResult{Repo: r.Name, Error: err.Error()}
+	}
+	if !ok {
+		return RepoAuditResult{Repo: r.Name, Skipped: true, Error: "insufficient permissions"}
+	}
+
+	// Get ruleset-based rules
+	rulesetRules, err := getBranchRules(owner, r.Name, branch)
+	if err != nil {
+		return RepoAuditResult{Repo: r.Name, Branch: branch, Error: err.Error()}
+	}
+
+	// Merge: the effective protection is the most restrictive
+	// combination of classic protection and rulesets
+	actual := config.MergeProtective(classicRules, rulesetRules)
+
+	effectiveRules := cfg.RulesForRepo(r.Name)
+	diffs := config.Compare(effectiveRules, actual, cfg.AllowStricterRules)
+	compliant := true
+	for _, d := range diffs {
+		if !d.Pass {
+			compliant = false
+			break
+		}
+	}
+
+	return RepoAuditResult{
+		Repo:        r.Name,
+		Branch:      branch,
+		Compliant:   compliant,
+		Diffs:       diffs,
+		ActualRules: actual,
+	}
+}
+
+// validateConcurrency rejects values below 1.
+func validateConcurrency(n int) error {
+	if n < 1 {
+		return fmt.Errorf("invalid --concurrency %d (must be >= 1)", n)
+	}
+	return nil
 }

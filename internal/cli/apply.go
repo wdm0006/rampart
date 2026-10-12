@@ -19,6 +19,11 @@ var applyCmd = &cobra.Command{
 		exclude, _ := cmd.Flags().GetStringSlice("exclude")
 		configPath, _ := cmd.Flags().GetString("config")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		concurrency, _ := cmd.Flags().GetInt("concurrency")
+
+		if err := validateConcurrency(concurrency); err != nil {
+			exitWithError(err.Error())
+		}
 
 		if owner == "" {
 			user, err := github.GetCurrentUser()
@@ -28,7 +33,7 @@ var applyCmd = &cobra.Command{
 			owner = user
 		}
 
-		results, cfg := auditRepos(owner, repo, configPath, exclude)
+		results, cfg := auditRepos(owner, repo, configPath, exclude, concurrency)
 
 		// Find non-compliant repos and resolve their effective rules
 		type repoUpdate struct {
@@ -172,5 +177,6 @@ func init() {
 	applyCmd.Flags().String("repo", "", "Apply to a single repo instead of all repos")
 	applyCmd.Flags().StringSlice("exclude", nil, "Repos to exclude (repeatable)")
 	applyCmd.Flags().String("config", "rampart.yaml", "Path to config file")
+	applyCmd.Flags().Int("concurrency", defaultConcurrency, "Number of repos to read in parallel (1 = serial)")
 	applyCmd.Flags().Bool("dry-run", false, "Preview changes without applying")
 }
