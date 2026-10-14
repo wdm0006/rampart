@@ -109,6 +109,7 @@ Options:
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
 - `--report FILE` — write a self-contained HTML report to the given path
+- `--concurrency N` — repos read in parallel (default `4`, minimum `1`; `1` is serial). Output order is unchanged. Keep it low on large fleets to stay under GitHub rate limits
 - `--format text|json` — output format (default `text`); `json` is written to stdout, progress lines go to stderr
 
 **Repo visibility.** With `--owner` omitted (or set to your own login), rampart audits every repo you own, public and private. For an organization, it audits every repo your token can see, including private ones. Auditing *another* user's account can only ever see their **public** repos — GitHub's user-repository API exposes nothing else, regardless of token scopes.
@@ -127,6 +128,7 @@ Options:
 - `--repo NAME` — apply to a single repo
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
+- `--concurrency N` — repos read in parallel (default `4`, minimum `1`; `1` is serial). Output order is unchanged. Keep it low on large fleets to stay under GitHub rate limits
 - `--dry-run` — preview changes without applying
 
 ## How it works

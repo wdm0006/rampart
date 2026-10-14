@@ -30,7 +30,7 @@ func TestAuditReposRecordsBranchRulesReadError(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	results, _ := auditRepos("acme", "widget", configPath, nil)
+	results, _ := auditRepos("acme", "widget", configPath, nil, 1)
 	if len(results) != 1 {
 		t.Fatalf("len(results) = %d, want 1", len(results))
 	}
@@ -71,7 +71,7 @@ func TestAuditReposCarriesMergedActualRules(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	results, _ := auditRepos("acme", "widget", configPath, nil)
+	results, _ := auditRepos("acme", "widget", configPath, nil, 1)
 	if len(results) != 1 {
 		t.Fatalf("len(results) = %d, want 1", len(results))
 	}
