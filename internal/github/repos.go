@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -141,10 +142,16 @@ func GetRepo(owner, name string) (Repo, error) {
 // Returns zero Rules if no protection is set (404).
 // Returns an error string for permission errors (403) that should be surfaced per-repo.
 func GetBranchProtection(owner, repo, branch string) (config.Rules, bool, error) {
+	return getBranchProtection(owner, repo, branch, defaultRetryPolicy().wrap(runCommand))
+}
+
+func getBranchProtection(owner, repo, branch string, run commandRunner) (config.Rules, bool, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/branches/%s/protection", owner, repo, branch)
-	cmd := exec.Command("gh", "api", endpoint)
-	output, err := cmd.Output()
+	output, err := run("gh", "api", endpoint)
 	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			return config.Rules{}, false, err
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return classifyProtectionResult(string(exitErr.Stderr))
 		}
@@ -160,6 +167,9 @@ func GetBranchProtection(owner, repo, branch string) (config.Rules, bool, error)
 }
 
 func classifyProtectionResult(stderr string) (config.Rules, bool, error) {
+	if isRateLimited(stderr) {
+		return config.Rules{}, false, ErrRateLimited
+	}
 	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") ||
 		strings.Contains(stderr, "Branch not protected") {
 		return config.NoProtectionRules(), true, nil

@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,7 +52,7 @@ type commandRunner func(name string, args ...string) ([]byte, error)
 // GetBranchRules returns the effective ruleset-based rules for a branch
 // by querying the GitHub branch rules endpoint.
 func GetBranchRules(owner, repo, branch string) (config.Rules, error) {
-	return getBranchRules(owner, repo, branch, runCommand)
+	return getBranchRules(owner, repo, branch, defaultRetryPolicy().wrap(runCommand))
 }
 
 func runCommand(name string, args ...string) ([]byte, error) {
@@ -62,6 +63,9 @@ func getBranchRules(owner, repo, branch string, run commandRunner) (config.Rules
 	endpoint := fmt.Sprintf("repos/%s/%s/rules/branches/%s", owner, repo, branch)
 	output, err := run("gh", "api", endpoint, "--paginate")
 	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			return config.Rules{}, err
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			handled, classifyErr := classifyBranchRulesError(string(exitErr.Stderr))
 			if handled {
@@ -108,6 +112,9 @@ func getBranchRules(owner, repo, branch string, run commandRunner) (config.Rules
 }
 
 func classifyBranchRulesError(stderr string) (bool, error) {
+	if isRateLimited(stderr) {
+		return false, ErrRateLimited
+	}
 	if strings.Contains(stderr, "404") || strings.Contains(stderr, "Not Found") {
 		return true, nil
 	}
@@ -121,6 +128,9 @@ func getRulesetDetail(owner, repo string, rulesetID int, run commandRunner) (rul
 	endpoint := fmt.Sprintf("repos/%s/%s/rulesets/%d", owner, repo, rulesetID)
 	output, err := run("gh", "api", endpoint)
 	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			return rulesetDetail{}, err
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return rulesetDetail{}, fmt.Errorf("failed to read ruleset %d: %s", rulesetID, string(exitErr.Stderr))
 		}
