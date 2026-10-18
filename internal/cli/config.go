@@ -20,7 +20,10 @@ creates or updates a repository ruleset named "rampart".
 Both commands read repos in parallel; --concurrency N (default 4, minimum
 1, 1 = serial) bounds how many repos are read at once. Results always
 appear in repo-list order. Keep N low on large fleets to stay under
-GitHub rate limits.
+GitHub rate limits. Reads that hit a rate limit are retried a few times
+with backoff (writes are never retried); if the limit persists the repo
+is reported as an error ("GitHub API rate limit exceeded; retry later or
+lower --concurrency"), not as insufficient permissions.
 
 TOP-LEVEL OPTIONS
 =================

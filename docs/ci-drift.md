@@ -45,3 +45,13 @@ The job summary, log and report distinguish drift from read errors; the exit cod
 ## Read-only audit, manual remediation
 
 `audit` only reads. To converge drift, review the report, then run `rampart apply --owner OWNER --dry-run` and `rampart apply --owner OWNER` yourself with a token that has write access. Scheduled auto-remediation is deliberately not part of this example.
+
+## Rate limits
+
+Large fleets can hit GitHub's primary or secondary rate limits. Rampart
+retries rate-limited reads up to three times with capped exponential backoff
+and jitter (`apply` writes are never retried). If the limit persists, the
+repository is reported as an error (`GitHub API rate limit exceeded; retry
+later or lower --concurrency`) and the run exits 1; this is distinct from an
+`insufficient permissions` error, so do not widen the token for it. If it
+recurs on a scheduled run, lower `--concurrency` (default 4).
