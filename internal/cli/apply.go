@@ -93,12 +93,12 @@ var applyCmd = &cobra.Command{
 						fmt.Printf(" failed: %s\n", err)
 						failed++
 					} else {
-						updatedDelta, failedDelta := reportApplySuccess(unenforceable)
+						updatedDelta, failedDelta := verifyApply(owner, r.Repo, r.Branch, r.EffectiveRules, cfg.AllowStricterRules, unenforceable)
 						updated += updatedDelta
 						failed += failedDelta
 					}
 				} else {
-					updatedDelta, failedDelta := reportApplySuccess(unenforceable)
+					updatedDelta, failedDelta := verifyApply(owner, r.Repo, r.Branch, r.EffectiveRules, cfg.AllowStricterRules, unenforceable)
 					updated += updatedDelta
 					failed += failedDelta
 				}
@@ -118,6 +118,33 @@ var applyCmd = &cobra.Command{
 
 		return applyResultError(dryRun, failed)
 	},
+}
+
+func verifyApply(owner, repo, branch string, rules config.Rules, allowStricter bool, unenforceable []string) (updated, failed int) {
+	result := auditOne(owner, github.Repo{Name: repo}, config.Config{
+		Branch: branch, Rules: rules, AllowStricterRules: allowStricter,
+	}, nil)
+	if result.Error != "" || result.Skipped {
+		fmt.Printf(" failed: verification read failed: %s\n", result.Error)
+		return 0, 1
+	}
+	if !result.Compliant {
+		fmt.Println(" failed: residual drift after apply")
+		for _, d := range result.Diffs {
+			if !d.Pass {
+				fmt.Printf("      %s: %s → %s\n", d.Rule, d.Got, d.Want)
+			}
+		}
+		if len(unenforceable) > 0 {
+			reportApplySuccess(unenforceable)
+		}
+		return 0, 1
+	}
+	if len(unenforceable) > 0 {
+		return reportApplySuccess(unenforceable)
+	}
+	fmt.Println(" verified")
+	return 1, 0
 }
 
 func reportApplySuccess(unenforceable []string) (updated, failed int) {
