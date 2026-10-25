@@ -11,6 +11,10 @@ import (
 const stepSummaryRowLimit = 50
 
 func renderStepSummary(owner string, results []RepoAuditResult) string {
+	return renderStepSummaryBaseline(owner, results, nil)
+}
+
+func renderStepSummaryBaseline(owner string, results []RepoAuditResult, ev *baselineEval) string {
 	counts := jsonSummary{Total: len(results)}
 	for _, r := range results {
 		switch repoStatus(r) {
@@ -25,6 +29,15 @@ func renderStepSummary(owner string, results []RepoAuditResult) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "\n### Rampart audit: %s\n\n", summaryCell(owner))
 	fmt.Fprintf(&out, "%d compliant, %d non-compliant (including errors), %d skipped out of %d repos\n\n", counts.Compliant, counts.NonCompliant, counts.Skipped, counts.Total)
+	if ev != nil {
+		fmt.Fprintf(&out, "Baseline: %d baselined, %d new failures\n\n", ev.BaselinedCount, ev.NewFailures)
+		for _, f := range ev.Fixed {
+			fmt.Fprintf(&out, "- fixed - remove from baseline: %s\n", summaryCell(f))
+		}
+		if len(ev.Fixed) > 0 {
+			out.WriteString("\n")
+		}
+	}
 	rows := 0
 	addRow := func(repo, rule, want, got string) {
 		if rows == 0 {
@@ -44,7 +57,11 @@ func renderStepSummary(owner string, results []RepoAuditResult) string {
 		} else if !r.Compliant {
 			for _, d := range r.Diffs {
 				if !d.Pass {
-					addRow(r.Repo, d.Rule, d.Want, d.Got)
+					rule := d.Rule
+					if ev.isBaselined(r.Repo, d.Rule) {
+						rule += " (baselined)"
+					}
+					addRow(r.Repo, rule, d.Want, d.Got)
 				}
 			}
 		}
@@ -61,12 +78,12 @@ func summaryCell(value string) string {
 	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "\r\n", "<br>", "\r", "<br>", "\n", "<br>").Replace(value)
 }
 
-func appendStepSummary(owner string, results []RepoAuditResult, warnings io.Writer) {
+func appendStepSummary(owner string, results []RepoAuditResult, ev *baselineEval, warnings io.Writer) {
 	summaryPath := os.Getenv("GITHUB_STEP_SUMMARY")
 	if summaryPath == "" {
 		return
 	}
-	err := writeStepSummary(summaryPath, renderStepSummary(owner, results))
+	err := writeStepSummary(summaryPath, renderStepSummaryBaseline(owner, results, ev))
 	if err != nil {
 		fmt.Fprintf(warnings, "Warning: could not write GitHub Actions job summary: %v\n", err)
 	}

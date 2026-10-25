@@ -23,6 +23,8 @@ type jsonDiff struct {
 	Pass bool   `json:"pass"`
 	Want string `json:"want"`
 	Got  string `json:"got"`
+	// Baselined is true for a failing rule grandfathered by --baseline.
+	Baselined bool `json:"baselined"`
 }
 
 type jsonRepo struct {
@@ -46,6 +48,8 @@ type jsonAudit struct {
 	Branch  string      `json:"branch"`
 	Summary jsonSummary `json:"summary"`
 	Repos   []jsonRepo  `json:"repos"`
+	// BaselineFixed lists baseline entries that now pass (--baseline only).
+	BaselineFixed []string `json:"baseline_fixed,omitempty"`
 }
 
 func repoStatus(r RepoAuditResult) string {
@@ -61,7 +65,7 @@ func repoStatus(r RepoAuditResult) string {
 	}
 }
 
-func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult) jsonAudit {
+func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult, ev *baselineEval) jsonAudit {
 	counts := newReportData(owner, configPath, branch, results)
 	out := jsonAudit{
 		Owner:  owner,
@@ -84,9 +88,12 @@ func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult)
 			Diffs:  make([]jsonDiff, 0, len(r.Diffs)),
 		}
 		for _, d := range r.Diffs {
-			repo.Diffs = append(repo.Diffs, jsonDiff{Rule: d.Rule, Pass: d.Pass, Want: d.Want, Got: d.Got})
+			repo.Diffs = append(repo.Diffs, jsonDiff{Rule: d.Rule, Pass: d.Pass, Want: d.Want, Got: d.Got, Baselined: !d.Pass && ev.isBaselined(r.Repo, d.Rule)})
 		}
 		out.Repos = append(out.Repos, repo)
+	}
+	if ev != nil {
+		out.BaselineFixed = append(out.BaselineFixed, ev.Fixed...)
 	}
 	return out
 }

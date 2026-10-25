@@ -63,8 +63,8 @@ func TestAppendStepSummary(t *testing.T) {
 	}
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
 	var warnings bytes.Buffer
-	appendStepSummary("org", nil, &warnings)
-	appendStepSummary("org", nil, &warnings)
+	appendStepSummary("org", nil, nil, &warnings)
+	appendStepSummary("org", nil, nil, &warnings)
 	got, err := os.ReadFile(summaryPath)
 	if err != nil {
 		t.Fatal(err)
@@ -74,13 +74,13 @@ func TestAppendStepSummary(t *testing.T) {
 		t.Fatalf("got %q, warnings %q", got, warnings.String())
 	}
 	t.Setenv("GITHUB_STEP_SUMMARY", "")
-	appendStepSummary("other", nil, &warnings)
+	appendStepSummary("other", nil, nil, &warnings)
 	got, err = os.ReadFile(summaryPath)
 	if err != nil || string(got) != want {
 		t.Fatalf("unset env changed file: %q, %v", got, err)
 	}
 	t.Setenv("GITHUB_STEP_SUMMARY", t.TempDir())
-	appendStepSummary("org", nil, &warnings)
+	appendStepSummary("org", nil, nil, &warnings)
 	if !strings.Contains(warnings.String(), "Warning: could not write GitHub Actions job summary:") {
 		t.Fatalf("warnings = %q", warnings.String())
 	}
