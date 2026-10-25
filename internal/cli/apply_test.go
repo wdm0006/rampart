@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/wdm0006/rampart/internal/config"
 )
 
 func TestApplyResultError(t *testing.T) {
@@ -162,6 +167,114 @@ func TestReportApplySuccess(t *testing.T) {
 			}
 			if got := applyResultError(false, failed); (got != nil) != tt.wantExitError {
 				t.Errorf("applyResultError(false, %d) = %v, want error %v", failed, got, tt.wantExitError)
+			}
+		})
+	}
+}
+
+func TestApplyPostWriteVerification(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		after        int
+		readError    bool
+		skip         bool
+		dryRun       bool
+		restrictions bool
+		stricter     bool
+		want         string
+		failed       bool
+	}{
+		{name: "residual drift", want: "required_approvals: 0 → 1", failed: true},
+		{name: "verified", after: 1, want: "verified"},
+		{name: "classic restrictions", after: 1, restrictions: true, want: "verified"},
+		{name: "read error", readError: true, want: "verification read failed: unavailable", failed: true},
+		{name: "skipped verification", skip: true, want: "verification read failed: insufficient permissions", failed: true},
+		{name: "dry run", dryRun: true, want: "would be updated"},
+		{name: "external protection", after: 2, stricter: true, want: "cannot converge", failed: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nprintf '[]'\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			policy := "branch: main\nrules:\n  require_pull_request: true\n  required_approvals: 1\n"
+			if tt.restrictions {
+				policy += "  restrictions: {}\n"
+			}
+			cfgPath := filepath.Join(dir, "policy.yaml")
+			if err := os.WriteFile(cfgPath, []byte(policy), 0644); err != nil {
+				t.Fatal(err)
+			}
+			oldProtection, oldRules := getBranchProtection, getBranchRules
+			t.Cleanup(func() { getBranchProtection, getBranchRules = oldProtection, oldRules })
+			reads := 0
+			getBranchProtection = func(owner, repo, branch string) (config.Rules, bool, error) {
+				if owner != "acme" || repo != "widget" || branch != "main" {
+					t.Errorf("unexpected audit target %s/%s %s", owner, repo, branch)
+				}
+				reads++
+				actual := config.Rules{RequirePullRequest: true}
+				if reads == 1 {
+					if tt.stricter {
+						actual.RequiredApprovals = 2
+						actual.AllowForcePushes = true
+					}
+				} else {
+					if tt.readError {
+						return config.Rules{}, false, errors.New("unavailable")
+					}
+					if tt.skip {
+						return config.Rules{}, false, nil
+					}
+					actual.RequiredApprovals = tt.after
+					if tt.restrictions {
+						actual.Restrictions = &config.Restrictions{}
+					}
+				}
+				return actual, true, nil
+			}
+			getBranchRules = func(_, _, _ string) (config.Rules, error) { return config.NoProtectionRules(), nil }
+			for flag, value := range map[string]string{"owner": "acme", "repo": "widget", "config": cfgPath, "dry-run": strconv.FormatBool(tt.dryRun), "concurrency": "1"} {
+				f := applyCmd.Flags().Lookup(flag)
+				old := f.Value.String()
+				t.Cleanup(func() { _ = f.Value.Set(old) })
+				if err := f.Value.Set(value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldStdout := os.Stdout
+			os.Stdout = w
+			err = applyCmd.RunE(applyCmd, nil)
+			os.Stdout = oldStdout
+			_ = w.Close()
+			output, readErr := io.ReadAll(r)
+			_ = r.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if (err != nil) != tt.failed {
+				t.Errorf("error = %v, want failure %v", err, tt.failed)
+			}
+			if !strings.Contains(string(output), tt.want) {
+				t.Errorf("output %q missing %q", output, tt.want)
+			}
+			if tt.failed && !strings.Contains(string(output), "Results: 0 updated, 1 failed, 0 skipped") {
+				t.Errorf("incorrect counts: %s", output)
+			}
+			if !tt.failed && !tt.dryRun && !strings.Contains(string(output), "Results: 1 updated, 0 failed, 0 skipped") {
+				t.Errorf("incorrect counts: %s", output)
+			}
+			wantReads := 2
+			if tt.dryRun {
+				wantReads = 1
+			}
+			if reads != wantReads {
+				t.Errorf("reads = %d, want %d", reads, wantReads)
 			}
 		})
 	}
