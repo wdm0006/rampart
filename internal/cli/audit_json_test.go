@@ -33,7 +33,7 @@ func TestAuditJSONExact(t *testing.T) {
 		{Repo: "bad", Branch: "main", Error: "boom"},
 	}
 	var buf bytes.Buffer
-	if err := writeAuditJSON(&buf, buildAuditJSON("org", "rampart.yaml", "default", results)); err != nil {
+	if err := writeAuditJSON(&buf, buildAuditJSON("org", "rampart.yaml", "default", results, nil)); err != nil {
 		t.Fatal(err)
 	}
 	want := `{
@@ -57,7 +57,8 @@ func TestAuditJSONExact(t *testing.T) {
           "rule": "require_pull_request",
           "pass": true,
           "want": "true",
-          "got": "true"
+          "got": "true",
+          "baselined": false
         }
       ]
     },
@@ -71,13 +72,15 @@ func TestAuditJSONExact(t *testing.T) {
           "rule": "required_approvals",
           "pass": false,
           "want": "2",
-          "got": "1"
+          "got": "1",
+          "baselined": false
         },
         {
           "rule": "required_checks",
           "pass": true,
           "want": "[b a]",
-          "got": "[b a]"
+          "got": "[b a]",
+          "baselined": false
         }
       ]
     },
@@ -111,7 +114,7 @@ func TestAuditJSONSummaryMatchesTerminalRule(t *testing.T) {
 	results := []RepoAuditResult{
 		{Repo: "a", Compliant: true}, {Repo: "b"}, {Repo: "c", Error: "x"}, {Repo: "d", Skipped: true},
 	}
-	s := buildAuditJSON("o", "c", "b", results).Summary
+	s := buildAuditJSON("o", "c", "b", results, nil).Summary
 	want := jsonSummary{Compliant: 1, NonCompliant: 2, Skipped: 1, Total: 4}
 	if s != want {
 		t.Fatalf("got %+v want %+v", s, want)

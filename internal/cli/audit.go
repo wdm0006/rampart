@@ -45,12 +45,24 @@ var auditCmd = &cobra.Command{
 		reportPath, _ := cmd.Flags().GetString("report")
 		format, _ := cmd.Flags().GetString("format")
 		concurrency, _ := cmd.Flags().GetInt("concurrency")
+		baselinePath, _ := cmd.Flags().GetString("baseline")
+		writeBaselinePath, _ := cmd.Flags().GetString("write-baseline")
 
 		if err := validateConcurrency(concurrency); err != nil {
 			exitWithError(err.Error())
 		}
 		if err := validateFormat(format); err != nil {
 			exitWithError(err.Error())
+		}
+		if baselinePath != "" && writeBaselinePath != "" {
+			exitWithError("--baseline and --write-baseline cannot be used together")
+		}
+		var base baselineFile
+		if baselinePath != "" {
+			var err error
+			if base, err = loadBaseline(baselinePath); err != nil {
+				exitWithError(err.Error())
+			}
 		}
 		if format == formatJSON {
 			progressOut = os.Stderr
@@ -66,10 +78,23 @@ var auditCmd = &cobra.Command{
 		}
 
 		results, cfg := auditRepos(owner, repo, configPath, exclude, concurrency)
-		appendStepSummary(owner, results, os.Stderr)
+		var ev *baselineEval
+		if baselinePath != "" {
+			e := evaluateBaseline(results, base)
+			ev = &e
+		}
+		appendStepSummary(owner, results, ev, os.Stderr)
+		if writeBaselinePath != "" {
+			if err := writeBaseline(writeBaselinePath, buildBaseline(results)); err != nil {
+				exitWithError(err.Error())
+			}
+			fmt.Fprintf(os.Stderr, "Baseline written to %s\n", writeBaselinePath)
+		}
+		// With --write-baseline only read errors fail: they are never recorded.
+		failing := auditFailing(results, ev, writeBaselinePath != "")
 
 		if format == formatJSON {
-			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results)); err != nil {
+			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results, ev)); err != nil {
 				exitWithError(err.Error())
 			}
 			if reportPath != "" {
@@ -79,7 +104,7 @@ var auditCmd = &cobra.Command{
 				}
 				fmt.Fprintf(os.Stderr, "Report written to %s\n", reportPath)
 			}
-			if newReportData(owner, configPath, cfg.Branch, results).NonCompliant > 0 {
+			if failing {
 				os.Exit(1)
 			}
 			return
@@ -104,7 +129,11 @@ var auditCmd = &cobra.Command{
 				nonCompliant++
 				for _, d := range r.Diffs {
 					if !d.Pass {
-						fmt.Printf("      %s: want %s, got %s\n", d.Rule, d.Want, d.Got)
+						tag := ""
+						if ev.isBaselined(r.Repo, d.Rule) {
+							tag = " (baselined)"
+						}
+						fmt.Printf("      %s: want %s, got %s%s\n", d.Rule, d.Want, d.Got, tag)
 					}
 				}
 			}
@@ -122,6 +151,9 @@ var auditCmd = &cobra.Command{
 		}
 		fmt.Printf("Results: %d compliant, %d non-compliant, %d skipped out of %d repos\n",
 			compliant, nonCompliant, skipped, total)
+		if ev != nil {
+			printBaselineText(os.Stdout, *ev)
+		}
 
 		if reportPath != "" {
 			data := newReportData(owner, configPath, cfg.Branch, results)
@@ -131,7 +163,7 @@ var auditCmd = &cobra.Command{
 			fmt.Printf("\nReport written to %s\n", reportPath)
 		}
 
-		if nonCompliant > 0 {
+		if failing {
 			os.Exit(1)
 		}
 	},
@@ -144,6 +176,8 @@ func init() {
 	auditCmd.Flags().String("config", "rampart.yaml", "Path to config file")
 	auditCmd.Flags().String("format", formatText, "Output format: text or json (json goes to stdout)")
 	auditCmd.Flags().Int("concurrency", defaultConcurrency, "Number of repos to read in parallel (1 = serial)")
+	auditCmd.Flags().String("baseline", "", "Only fail on drift not recorded in this baseline file (read errors always fail)")
+	auditCmd.Flags().String("write-baseline", "", "Record current failing rules to this file; exits 1 only on read errors")
 	auditCmd.Flags().String("report", "", "Write an HTML report to the given file path")
 }
 
@@ -267,4 +301,18 @@ func validateConcurrency(n int) error {
 		return fmt.Errorf("invalid --concurrency %d (must be >= 1)", n)
 	}
 	return nil
+}
+
+// auditFailing decides the audit exit status. With a baseline only new
+// failures and read errors fail; when writing a baseline only read errors do,
+// since they are never recorded.
+func auditFailing(results []RepoAuditResult, ev *baselineEval, writingBaseline bool) bool {
+	switch {
+	case ev != nil:
+		return ev.NewFailures > 0
+	case writingBaseline:
+		return readErrorCount(results) > 0
+	default:
+		return newReportData("", "", "", results).NonCompliant > 0
+	}
 }

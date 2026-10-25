@@ -42,6 +42,26 @@ Secrets are not available to workflows triggered from forks, so a fork's runs ca
 
 The job summary, log and report distinguish drift from read errors; the exit code does not.
 
+## Adopting on a fleet with existing drift (baseline)
+
+To gate only on new drift, record the current failures once and commit the file:
+
+```sh
+rampart audit --owner OWNER --write-baseline rampart-baseline.json
+```
+
+Then audit with `--baseline`:
+
+```sh
+rampart audit --owner OWNER --baseline rampart-baseline.json --report rampart-report.html
+```
+
+- A failing rule listed for that repo in the baseline is reported as `(baselined)` (and `"baselined": true` per diff in `--format json`) and does not affect the exit code.
+- Any failing rule not in the baseline, a new failing repo, or any read error exits `1`. Repos that failed to read are never written to a baseline, so a read failure can never be grandfathered.
+- Baseline entries that now pass are listed as `fixed - remove from baseline` (also `baseline_fixed` in JSON); this is informational. Re-run `--write-baseline` to ratchet the file down.
+- A missing, unreadable or malformed baseline file is an error (exit `1`), never an empty baseline.
+- `--write-baseline` exits `1` only if a repo could not be read; recorded drift does not fail that run. `--baseline` and `--write-baseline` cannot be combined.
+
 ## Read-only audit, manual remediation
 
 `audit` only reads. To converge drift, review the report, then run `rampart apply --owner OWNER --dry-run` and `rampart apply --owner OWNER` yourself with a token that has write access. Scheduled auto-remediation is deliberately not part of this example.
