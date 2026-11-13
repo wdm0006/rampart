@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.0
+
+### Features
+
+- Add `audit --write-baseline` and `--baseline` to record existing failing rules and gate fleet adoption on new drift. Read errors always fail; text, JSON, and GitHub Actions summaries identify baselined failures and entries that now pass.
+
+### Bug Fixes
+
+- Re-audit repositories after successful `apply` writes and report `verified` only when protection matches policy. Residual drift or verification read failures now count as failures and return a non-zero exit status.
+
 ## v0.8.1
 
 ### Bug Fixes
