@@ -102,12 +102,14 @@ Generate a `rampart.yaml` with sensible defaults in the current directory.
 
 ### `rampart audit --owner NAME`
 
-Check all repos for the given user/org against your config. Shows pass/fail per rule for each repo. Exits non-zero if any repos are non-compliant (useful in CI).
+Check all repos for the given user/org against your config. Shows pass/fail per rule for each repo. By default, exits non-zero if any repos are non-compliant or cannot be read (useful in CI). With `--baseline`, only new drift and read errors fail.
 
 Options:
 - `--repo NAME` — audit a single repo
 - `--exclude NAME` — exclude repos (repeatable)
 - `--config FILE` — config path (default: `rampart.yaml`)
+- `--baseline FILE` — fail only on drift not recorded in the baseline; read errors always fail
+- `--write-baseline FILE` — record current failing rules; exits non-zero on read errors. Cannot be combined with `--baseline`
 - `--report FILE` — write a self-contained HTML report to the given path
 - `--concurrency N` — repos read in parallel (default `4`, minimum `1`; `1` is serial). Output order is unchanged. Keep it low on large fleets to stay under GitHub rate limits
 - `--format text|json` — output format (default `text`); `json` is written to stdout, progress lines go to stderr
@@ -120,7 +122,7 @@ Show detailed documentation for all `rampart.yaml` configuration options.
 
 ### `rampart apply --owner NAME`
 
-Apply your config to any non-compliant repos.
+Apply your config to any non-compliant repos. After successful writes, Rampart re-audits each repository and reports `verified` only when it is compliant. Residual drift or verification read failures count as failures and exit non-zero. `--dry-run` previews changes without writes or post-write verification.
 
 Apply creates or updates the managed `rampart` ruleset, which can only add protection. If classic branch protection or another ruleset makes a repository stricter than the config, apply still writes any fixable changes but reports the repository as failed and exits non-zero. Relax the named rules manually or set `allow_stricter_rules: true` to accept them.
 
@@ -138,7 +140,7 @@ Options:
 3. Fetches current branch protection from both classic protection and rulesets
 4. Merges them (most restrictive combination wins)
 5. Compares effective rules against desired config
-6. Reports compliance (audit) or applies fixes via rulesets (apply)
+6. Reports compliance (audit) or applies fixes via rulesets and re-audits to verify protection (apply)
 
 Rampart supports both **classic branch protection** and the newer **GitHub rulesets API**. During audit, both sources are checked. During apply, rampart creates or updates a repository ruleset named "rampart".
 
@@ -151,7 +153,7 @@ All GitHub API calls go through the `gh` CLI, so authentication is handled by yo
   run: rampart audit --owner myorg --config rampart.yaml
 ```
 
-The `audit` command exits non-zero when any repos are non-compliant, making it easy to use as a CI check.
+By default, `audit` exits non-zero on drift or read errors. To adopt it on a fleet with existing drift, record failures with `--write-baseline rampart-baseline.json`, commit the file, then use `--baseline rampart-baseline.json` to gate on new drift. Read errors always fail. See the [baseline guide](docs/ci-drift.md#adopting-on-a-fleet-with-existing-drift-baseline) for details.
 
 For machine-readable results, use `--format json`:
 
@@ -174,7 +176,7 @@ Schema (stable key order; repos appear in audit order, diffs in check order; exi
       "branch": "main",
       "status": "non_compliant",
       "error": "",
-      "diffs": [{"rule": "required_approvals", "pass": false, "want": "2", "got": "1"}]
+      "diffs": [{"rule": "required_approvals", "pass": false, "want": "2", "got": "1", "baselined": false}]
     }
   ]
 }
@@ -182,6 +184,7 @@ Schema (stable key order; repos appear in audit order, diffs in check order; exi
 
 - `status` is one of `compliant`, `non_compliant`, `skipped`, `error`. `error` is empty unless the repo was skipped or errored; `diffs` is `[]` when no checks ran.
 - `summary` uses the same counts as the terminal and HTML summaries: errored repos count as `non_compliant`, and `total` includes skipped repos.
+- Each diff includes `baselined`, true only for a failing rule recorded in the supplied baseline. With `--baseline`, `baseline_fixed` lists entries that now pass when any are found; remove those entries to ratchet adoption. Baselines affect exit status, while summary counts still reflect actual protection.
 - An invalid `--format` value is rejected before any GitHub call.
 
 In GitHub Actions, `audit` automatically appends counts and up to 50 failing-rule/error rows to the job summary when `GITHUB_STEP_SUMMARY` is set, with either output format.
