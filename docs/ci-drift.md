@@ -75,3 +75,19 @@ repository is reported as an error (`GitHub API rate limit exceeded; retry
 later or lower --concurrency`) and the run exits 1; this is distinct from an
 `insufficient permissions` error, so do not widen the token for it. If it
 recurs on a scheduled run, lower `--concurrency` (default 4).
+
+## Comparing with the previous run (`--compare-to`)
+
+`--baseline` records accepted debt; `--compare-to` answers "what changed since the last run". Save the JSON output as an artifact and feed it back on the next run:
+
+```bash
+rampart audit --owner OWNER --format json --compare-to previous/audit.json > audit.json
+```
+
+Upload `audit.json` with `actions/upload-artifact` on every run, and download the previous run's artifact (for example with `gh run download` or `actions/download-artifact` with `run-id`) into `previous/` before auditing. Skip `--compare-to` on the first run, when no artifact exists yet.
+
+- Per repo, `newly_failing` and `newly_fixed` (omitted when empty) list rules that started or stopped failing; top-level `compare` lists `new_repos` and `removed_repos`. Text output and the Actions summary get a matching section.
+- A repo new to the fleet reports all its failing rules as newly failing.
+- Rules are compared only when the repo was readable (compliant or non-compliant) in both runs: an errored or skipped repo in either run reports nothing, so an unreadable previous state is never reported as "newly fixed".
+- A rule absent from the current policy is not reported as fixed.
+- The exit code is unchanged (current failures, or `--baseline`). A missing or malformed compare file exits `1` before any auditing.
