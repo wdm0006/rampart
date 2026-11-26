@@ -15,6 +15,10 @@ func renderStepSummary(owner string, results []RepoAuditResult) string {
 }
 
 func renderStepSummaryBaseline(owner string, results []RepoAuditResult, ev *baselineEval) string {
+	return renderStepSummaryFull(owner, results, ev, nil)
+}
+
+func renderStepSummaryFull(owner string, results []RepoAuditResult, ev *baselineEval, cmp *compareEval) string {
 	counts := jsonSummary{Total: len(results)}
 	for _, r := range results {
 		switch repoStatus(r) {
@@ -35,6 +39,20 @@ func renderStepSummaryBaseline(owner string, results []RepoAuditResult, ev *base
 			fmt.Fprintf(&out, "- fixed - remove from baseline: %s\n", summaryCell(f))
 		}
 		if len(ev.Fixed) > 0 {
+			out.WriteString("\n")
+		}
+	}
+	if cmp != nil {
+		fmt.Fprintf(&out, "Compared with previous run: %d new repos, %d removed repos\n\n", len(cmp.NewRepos), len(cmp.RemovedRepos))
+		lines := compareLines(*cmp, results)
+		for i, l := range lines {
+			if i == stepSummaryRowLimit {
+				fmt.Fprintf(&out, "- +%d more\n", len(lines)-stepSummaryRowLimit)
+				break
+			}
+			fmt.Fprintf(&out, "- %s\n", summaryCell(l))
+		}
+		if len(lines) > 0 {
 			out.WriteString("\n")
 		}
 	}
@@ -78,12 +96,12 @@ func summaryCell(value string) string {
 	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "\r\n", "<br>", "\r", "<br>", "\n", "<br>").Replace(value)
 }
 
-func appendStepSummary(owner string, results []RepoAuditResult, ev *baselineEval, warnings io.Writer) {
+func appendStepSummary(owner string, results []RepoAuditResult, ev *baselineEval, cmp *compareEval, warnings io.Writer) {
 	summaryPath := os.Getenv("GITHUB_STEP_SUMMARY")
 	if summaryPath == "" {
 		return
 	}
-	err := writeStepSummary(summaryPath, renderStepSummaryBaseline(owner, results, ev))
+	err := writeStepSummary(summaryPath, renderStepSummaryFull(owner, results, ev, cmp))
 	if err != nil {
 		fmt.Fprintf(warnings, "Warning: could not write GitHub Actions job summary: %v\n", err)
 	}

@@ -47,6 +47,7 @@ var auditCmd = &cobra.Command{
 		concurrency, _ := cmd.Flags().GetInt("concurrency")
 		baselinePath, _ := cmd.Flags().GetString("baseline")
 		writeBaselinePath, _ := cmd.Flags().GetString("write-baseline")
+		compareToPath, _ := cmd.Flags().GetString("compare-to")
 
 		if err := validateConcurrency(concurrency); err != nil {
 			exitWithError(err.Error())
@@ -61,6 +62,13 @@ var auditCmd = &cobra.Command{
 		if baselinePath != "" {
 			var err error
 			if base, err = loadBaseline(baselinePath); err != nil {
+				exitWithError(err.Error())
+			}
+		}
+		var prevRun jsonAudit
+		if compareToPath != "" {
+			var err error
+			if prevRun, err = loadPreviousRun(compareToPath); err != nil {
 				exitWithError(err.Error())
 			}
 		}
@@ -83,7 +91,12 @@ var auditCmd = &cobra.Command{
 			e := evaluateBaseline(results, base)
 			ev = &e
 		}
-		appendStepSummary(owner, results, ev, os.Stderr)
+		var cmp *compareEval
+		if compareToPath != "" {
+			c := evaluateCompare(results, prevRun)
+			cmp = &c
+		}
+		appendStepSummary(owner, results, ev, cmp, os.Stderr)
 		if writeBaselinePath != "" {
 			if err := writeBaseline(writeBaselinePath, buildBaseline(results)); err != nil {
 				exitWithError(err.Error())
@@ -94,7 +107,7 @@ var auditCmd = &cobra.Command{
 		failing := auditFailing(results, ev, writeBaselinePath != "")
 
 		if format == formatJSON {
-			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results, ev)); err != nil {
+			if err := writeAuditJSON(os.Stdout, buildAuditJSON(owner, configPath, cfg.Branch, results, ev, cmp)); err != nil {
 				exitWithError(err.Error())
 			}
 			if reportPath != "" {
@@ -154,6 +167,9 @@ var auditCmd = &cobra.Command{
 		if ev != nil {
 			printBaselineText(os.Stdout, *ev)
 		}
+		if cmp != nil {
+			printCompareText(os.Stdout, *cmp, results)
+		}
 
 		if reportPath != "" {
 			data := newReportData(owner, configPath, cfg.Branch, results)
@@ -178,6 +194,7 @@ func init() {
 	auditCmd.Flags().Int("concurrency", defaultConcurrency, "Number of repos to read in parallel (1 = serial)")
 	auditCmd.Flags().String("baseline", "", "Only fail on drift not recorded in this baseline file (read errors always fail)")
 	auditCmd.Flags().String("write-baseline", "", "Record current failing rules to this file; exits 1 only on read errors")
+	auditCmd.Flags().String("compare-to", "", "Report rules newly failing/fixed versus a previous --format json output (exit code unchanged)")
 	auditCmd.Flags().String("report", "", "Write an HTML report to the given file path")
 }
 

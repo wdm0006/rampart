@@ -33,6 +33,9 @@ type jsonRepo struct {
 	Status string     `json:"status"`
 	Error  string     `json:"error"`
 	Diffs  []jsonDiff `json:"diffs"`
+	// NewlyFailing and NewlyFixed are set by --compare-to.
+	NewlyFailing []string `json:"newly_failing,omitempty"`
+	NewlyFixed   []string `json:"newly_fixed,omitempty"`
 }
 
 type jsonSummary struct {
@@ -50,6 +53,8 @@ type jsonAudit struct {
 	Repos   []jsonRepo  `json:"repos"`
 	// BaselineFixed lists baseline entries that now pass (--baseline only).
 	BaselineFixed []string `json:"baseline_fixed,omitempty"`
+	// Compare is the fleet-level change set (--compare-to only).
+	Compare *jsonCompare `json:"compare,omitempty"`
 }
 
 func repoStatus(r RepoAuditResult) string {
@@ -65,7 +70,7 @@ func repoStatus(r RepoAuditResult) string {
 	}
 }
 
-func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult, ev *baselineEval) jsonAudit {
+func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult, ev *baselineEval, cmp *compareEval) jsonAudit {
 	counts := newReportData(owner, configPath, branch, results)
 	out := jsonAudit{
 		Owner:  owner,
@@ -90,10 +95,18 @@ func buildAuditJSON(owner, configPath, branch string, results []RepoAuditResult,
 		for _, d := range r.Diffs {
 			repo.Diffs = append(repo.Diffs, jsonDiff{Rule: d.Rule, Pass: d.Pass, Want: d.Want, Got: d.Got, Baselined: !d.Pass && ev.isBaselined(r.Repo, d.Rule)})
 		}
+		if cmp != nil {
+			ch := cmp.Changes[r.Repo]
+			repo.NewlyFailing = ch.NewlyFailing
+			repo.NewlyFixed = ch.NewlyFixed
+		}
 		out.Repos = append(out.Repos, repo)
 	}
 	if ev != nil {
 		out.BaselineFixed = append(out.BaselineFixed, ev.Fixed...)
+	}
+	if cmp != nil {
+		out.Compare = &jsonCompare{NewRepos: append([]string{}, cmp.NewRepos...), RemovedRepos: append([]string{}, cmp.RemovedRepos...)}
 	}
 	return out
 }

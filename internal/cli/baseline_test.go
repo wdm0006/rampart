@@ -161,7 +161,7 @@ func TestAuditJSONBaselined(t *testing.T) {
 	results := []RepoAuditResult{failing("r", "a", "b")}
 	base := baselineFile{Version: 1, Repos: map[string][]string{"r": {"a", "gone"}}}
 	ev := evaluateBaseline(results, base)
-	out := buildAuditJSON("o", "c", "main", results, &ev)
+	out := buildAuditJSON("o", "c", "main", results, &ev, nil)
 	d := out.Repos[0].Diffs
 	if !d[0].Baselined || d[1].Baselined {
 		t.Errorf("baselined flags: %+v", d)
@@ -169,7 +169,7 @@ func TestAuditJSONBaselined(t *testing.T) {
 	if !reflect.DeepEqual(out.BaselineFixed, []string{"r: gone"}) {
 		t.Errorf("fixed: %v", out.BaselineFixed)
 	}
-	plain := buildAuditJSON("o", "c", "main", results, nil)
+	plain := buildAuditJSON("o", "c", "main", results, nil, nil)
 	if plain.Repos[0].Diffs[0].Baselined || plain.BaselineFixed != nil {
 		t.Error("no baseline: nothing baselined")
 	}
