@@ -156,3 +156,16 @@ func TestLoadExtendsRejectsURL(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestLoadStandaloneYAMLMergeKeys(t *testing.T) {
+	policy := filepath.Join(t.TempDir(), "policy.yaml")
+	writePolicy(t, policy, "rules:\n  <<: &shared\n    required_checks: [build]\n    restrictions:\n      users: [alice]\n  enforce_admins: true\n")
+	got, err := Load(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Config{Branch: "default", Rules: Rules{EnforceAdmins: true, RequiredChecks: []string{"build"}, Restrictions: &Restrictions{Users: []string{"alice"}}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %#v, want %#v", got, want)
+	}
+}

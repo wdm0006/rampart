@@ -358,11 +358,11 @@ func Load(configPath string) (Config, error) {
 const maxPolicyDepth = 5
 
 type policyFile struct {
-	Extends            string        `yaml:"extends"`
-	Branch             *string       `yaml:"branch"`
-	AllowStricterRules *bool         `yaml:"allow_stricter_rules"`
-	Rules              OverrideRules `yaml:"rules"`
-	Overrides          []Override    `yaml:"overrides"`
+	Extends            string     `yaml:"extends"`
+	Branch             *string    `yaml:"branch"`
+	AllowStricterRules *bool      `yaml:"allow_stricter_rules"`
+	Rules              Rules      `yaml:"rules"`
+	Overrides          []Override `yaml:"overrides"`
 }
 
 func loadPolicy(configPath string, chain []string) (Config, error) {
@@ -427,7 +427,19 @@ func loadPolicy(configPath string, chain []string) (Config, error) {
 	if policy.AllowStricterRules != nil {
 		cfg.AllowStricterRules = *policy.AllowStricterRules
 	}
-	cfg.Rules = mergeOverride(cfg.Rules, policy.Rules)
+	if policy.Extends == "" {
+		cfg.Rules = policy.Rules
+	} else {
+		// Decode sparse rules only for extending files, preserving standalone
+		// policy decoding (including YAML merge keys).
+		var sparse struct {
+			Rules OverrideRules `yaml:"rules"`
+		}
+		if err := yaml.Unmarshal(data, &sparse); err != nil {
+			return Config{}, fmt.Errorf("failed to parse config %q: %w", absolute, err)
+		}
+		cfg.Rules = mergeOverride(cfg.Rules, sparse.Rules)
+	}
 	cfg.Overrides = append(cfg.Overrides, policy.Overrides...)
 	return cfg, nil
 }
