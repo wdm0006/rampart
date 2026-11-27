@@ -28,6 +28,17 @@ lower --concurrency"), not as insufficient permissions.
 TOP-LEVEL OPTIONS
 =================
 
+extends (string, optional)
+  Inherit one local policy file. Relative paths resolve against this file's
+  directory; absolute paths are supported. URLs are not supported.
+  Chains may contain at most five files; cycles are rejected.
+
+  Explicit child branch/allow_stricter_rules values replace inherited values.
+  Rules merge field by field: omitted fields inherit, while false, 0, empty
+  checks and null restrictions replace the inherited value. A restrictions
+  block replaces the whole allowlist. Base overrides run first, followed by
+  child overrides; later matching overrides win, including over child rules.
+
 branch (string, default: "default")
   The branch to audit and enforce protection rules on.
 
