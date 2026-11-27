@@ -64,7 +64,40 @@ rampart audit --owner OWNER --baseline rampart-baseline.json --report rampart-re
 
 ## Read-only audit, manual remediation
 
-`audit` only reads. To converge drift, review the report, then run `rampart apply --owner OWNER --dry-run` and `rampart apply --owner OWNER` yourself with a token that has write access. Scheduled auto-remediation is deliberately not part of this example.
+`audit` only reads. The drift workflow above never writes. To converge drift, either run `rampart apply --owner OWNER --dry-run` and `rampart apply --owner OWNER` yourself with a token that has write access, or use the opt-in workflow below.
+
+## Opt-in remediation
+
+[`examples/rampart-remediate.yml`](../examples/rampart-remediate.yml) runs `rampart apply` from CI. It is `workflow_dispatch` only; there is no default schedule.
+
+1. **Preview job** runs `rampart apply --dry-run` with the read-only `RAMPART_TOKEN` and uploads `rampart-preview.txt`. It runs on every dispatch.
+2. **Apply job** needs the preview job and runs only when the manual input `confirm` is exactly `apply` (`if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'apply'`). It also declares `environment: rampart-remediate`, so GitHub pauses it until a required reviewer approves. Without the input the job is skipped; without approval it never starts.
+3. `apply` re-audits each repo after writing and exits `1` on write errors, residual drift or failed verification, so a failed job means something was not converged.
+
+Setup:
+
+- Create the environment `rampart-remediate` (Settings, Environments) with **Required reviewers**, and consider restricting it to the default branch.
+- Store the write token as the **environment** secret `RAMPART_ADMIN_TOKEN` there, so it is released only after approval.
+- Workflow `permissions:` stay `contents: read`; both tokens are exported as `GH_TOKEN`, never the job token.
+
+### Write token scopes
+
+The token owner needs admin access to every repo in scope (as for audit) and must be able to create/update rulesets and branch protection.
+
+- **Fine-grained PAT:** repository access to the repos in scope with `Administration: Read and write` and `Metadata: Read-only`.
+- **Classic PAT:** the `repo` scope.
+
+Do not reuse the read-only drift token (`RAMPART_TOKEN`) for apply, and do not give the scheduled drift job the admin token. Keeping them separate means a compromised or mis-edited audit job still cannot write.
+
+### Scheduled variant (still dry-run)
+
+To get a recurring preview, add a `schedule:` trigger to a copy of the workflow that has no `apply` job (the example's `if:` also can never be true for a schedule event, because `inputs.confirm` is empty). A scheduled run then only produces the preview artifact; a human still dispatches with `confirm: apply` to write.
+
+### What apply cannot do
+
+- **Non-transactional `restrictions`.** Push allowlists are not expressible in the managed `rampart` ruleset, so when `restrictions` is configured `apply` writes the ruleset and then a classic branch-protection `PUT`. If the second call fails, the ruleset change stays in place and the repo is reported failed. The classic `PUT` replaces the whole classic protection for the branch with the policy's values, so review the preview for repos that rely on classic settings.
+- **Stricter external protection cannot be relaxed.** `apply` only adds protection through its managed ruleset. If classic protection or another ruleset is already stricter than an exact-match policy (`allow_stricter_rules: false`), the fixable drift is still written, but the repo is counted as failed and the run exits `1`, naming the rules involved. Remove or loosen that protection manually, or set `allow_stricter_rules: true` if stricter is acceptable.
+- Rate-limited writes are not retried; re-run the workflow after the limit resets.
 
 ## Rate limits
 
