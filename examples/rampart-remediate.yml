@@ -1,0 +1,99 @@
+# Opt-in Rampart remediation. See docs/ci-drift.md ("Opt-in remediation").
+# Copy to .github/workflows/rampart-remediate.yml in the repo that holds rampart.yaml.
+# Manual only: there is deliberately no default schedule.
+#
+# Requires:
+#   - secret RAMPART_ADMIN_TOKEN (write-capable; separate from the read-only
+#     RAMPART_TOKEN used by rampart-drift.yml), stored as an *environment* secret
+#     on the "rampart-remediate" environment.
+#   - environment "rampart-remediate" with Required reviewers enabled.
+name: Rampart remediate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "apply" to write changes. Anything else only previews.'
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rampart-remediate
+  cancel-in-progress: false
+
+env:
+  OWNER: myorg
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install rampart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo wdm0006/rampart --json tagName --jq .tagName)"
+          archive="rampart_${tag#v}_linux_amd64.tar.gz"
+          gh release download "$tag" --repo wdm0006/rampart \
+            --pattern "$archive" --pattern checksums.txt
+          grep " ${archive}\$" checksums.txt | sha256sum --check -
+          tar -xzf "$archive" rampart
+          sudo install -m 0755 rampart /usr/local/bin/rampart
+          rampart --version
+
+      - name: Preview changes (dry run, read-only token)
+        env:
+          GH_TOKEN: ${{ secrets.RAMPART_TOKEN }}
+        run: rampart apply --owner "$OWNER" --config rampart.yaml --dry-run | tee rampart-preview.txt
+
+      - name: Upload preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rampart-preview
+          path: rampart-preview.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  apply:
+    needs: preview
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: rampart-remediate
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install rampart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo wdm0006/rampart --json tagName --jq .tagName)"
+          archive="rampart_${tag#v}_linux_amd64.tar.gz"
+          gh release download "$tag" --repo wdm0006/rampart \
+            --pattern "$archive" --pattern checksums.txt
+          grep " ${archive}\$" checksums.txt | sha256sum --check -
+          tar -xzf "$archive" rampart
+          sudo install -m 0755 rampart /usr/local/bin/rampart
+          rampart --version
+
+      - name: Apply and verify
+        env:
+          GH_TOKEN: ${{ secrets.RAMPART_ADMIN_TOKEN }}
+        run: rampart apply --owner "$OWNER" --config rampart.yaml
+
+# Optional scheduled variant that never writes: add this trigger to the `on:` block
+# of a copy that omits the `apply` job (or keeps its `if:` as above, which a
+# schedule event can never satisfy):
+#
+#   schedule:
+#     - cron: "17 6 * * 1"
