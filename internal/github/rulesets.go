@@ -31,6 +31,7 @@ type pullRequestParams struct {
 	RequiredApprovingReviewCount   int  `json:"required_approving_review_count"`
 	DismissStaleReviewsOnPush      bool `json:"dismiss_stale_reviews_on_push"`
 	RequireCodeOwnerReview         bool `json:"require_code_owner_review"`
+	RequireLastPushApproval        bool `json:"require_last_push_approval"`
 	RequiredReviewThreadResolution bool `json:"required_review_thread_resolution"`
 }
 
@@ -177,6 +178,7 @@ func rulesFromBranchRules(branchRules []branchRule) (config.Rules, error) {
 				}
 				r.DismissStaleReviews = r.DismissStaleReviews || params.DismissStaleReviewsOnPush
 				r.RequireCodeOwnerReviews = r.RequireCodeOwnerReviews || params.RequireCodeOwnerReview
+				r.RequireLastPushApproval = r.RequireLastPushApproval || params.RequireLastPushApproval
 				r.RequiredConversationResolution = r.RequiredConversationResolution || params.RequiredReviewThreadResolution
 			}
 		case "required_status_checks":
@@ -331,7 +333,7 @@ func buildRulesetPayload(branch string, rules config.Rules) map[string]interface
 				"required_approving_review_count":   rules.RequiredApprovals,
 				"dismiss_stale_reviews_on_push":     rules.DismissStaleReviews,
 				"require_code_owner_review":         rules.RequireCodeOwnerReviews,
-				"require_last_push_approval":        false,
+				"require_last_push_approval":        rules.RequireLastPushApproval,
 				"required_review_thread_resolution": rules.RequiredConversationResolution,
 			},
 		})

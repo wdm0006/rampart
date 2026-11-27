@@ -73,6 +73,10 @@ dismiss_stale_reviews (bool, default: true)
   to the pull request. This forces re-review of changed code. Only
   evaluated when require_pull_request is true.
 
+require_last_push_approval (bool, default: false)
+  Require the most recent reviewable push to be approved by someone other
+  than the pusher. Only used when require_pull_request is true.
+
 require_code_owner_reviews (bool, default: false)
   Require an approving review from a designated code owner (as defined
   in a CODEOWNERS file) before merging. Only evaluated when
@@ -206,6 +210,7 @@ EXAMPLE CONFIG
     required_approvals: 1
     dismiss_stale_reviews: true
     require_code_owner_reviews: false
+    require_last_push_approval: false
     require_status_checks: true
     strict_status_checks: true
     required_checks:

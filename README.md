@@ -55,6 +55,7 @@ rules:
   required_approvals: 1
   dismiss_stale_reviews: true
   require_code_owner_reviews: false
+  require_last_push_approval: false
   require_status_checks: false
   strict_status_checks: true
   required_checks: []
@@ -71,6 +72,8 @@ rules:
 ```
 
 Setting `branch: default` resolves to each repo's actual default branch (e.g., `main` or `master`). You can also specify an exact branch name like `main` if preferred.
+
+Set `require_last_push_approval: true` with `require_pull_request: true` to require approval of the most recent reviewable push by someone other than the pusher. Rampart reads this setting from classic protection and effective rulesets, and writes it during apply.
 
 Setting `allow_stricter_rules: true` treats repos as compliant when their protection is stricter than your config. For example, if you require 1 approval but a repo requires 2, it passes. This applies directionally per rule — more approvals, extra required checks, and disabling force pushes are all considered "stricter".
 
@@ -185,6 +188,7 @@ Schema (stable key order; repos appear in audit order, diffs in check order; exi
 - `status` is one of `compliant`, `non_compliant`, `skipped`, `error`. `error` is empty unless the repo was skipped or errored; `diffs` is `[]` when no checks ran.
 - `summary` uses the same counts as the terminal and HTML summaries: errored repos count as `non_compliant`, and `total` includes skipped repos.
 - Each diff includes `baselined`, true only for a failing rule recorded in the supplied baseline. With `--baseline`, `baseline_fixed` lists entries that now pass when any are found; remove those entries to ratchet adoption. Baselines affect exit status, while summary counts still reflect actual protection.
+- Rule names are `require_pull_request`, `required_approvals`, `dismiss_stale_reviews`, `require_code_owner_reviews`, `require_last_push_approval`, `require_status_checks`, `strict_status_checks`, `required_checks`, `enforce_admins`, `allow_force_pushes`, `allow_deletions`, `required_linear_history`, `required_conversation_resolution`, and `restrictions`. Review and status-check subrules appear when their parent requirement is enabled; `restrictions` appears when configured.
 - An invalid `--format` value is rejected before any GitHub call.
 
 In GitHub Actions, `audit` automatically appends counts and up to 50 failing-rule/error rows to the job summary when `GITHUB_STEP_SUMMARY` is set, with either output format.
