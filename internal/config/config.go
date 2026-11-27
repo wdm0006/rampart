@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -339,46 +340,95 @@ func checkKnownFields(node *yaml.Node, t reflect.Type) error {
 	return nil
 }
 
-// Load reads and parses a rampart config file
+// Load reads and parses a rampart config file, including local base policies.
 func Load(configPath string) (Config, error) {
-	data, err := os.ReadFile(configPath)
+	cfg, err := loadPolicy(configPath, nil)
 	if err != nil {
-		return Config{}, fmt.Errorf("failed to read config: %w", err)
+		return Config{}, err
 	}
-
-	var cfg Config
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	// An empty file yields io.EOF and means "no configuration", matching the
-	// previous yaml.Unmarshal behavior.
-	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
-		return Config{}, fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	var extra yaml.Node
-	if err := dec.Decode(&extra); err == nil {
-		return Config{}, fmt.Errorf("failed to parse config: multiple YAML documents are unsupported")
-	} else if !errors.Is(err, io.EOF) {
-		return Config{}, fmt.Errorf("failed to parse config: %w", err)
-	}
-
 	if cfg.Branch == "" {
 		cfg.Branch = "default"
 	}
 	if cfg.Rules.RequiredChecks == nil {
 		cfg.Rules.RequiredChecks = []string{}
 	}
+	return cfg, nil
+}
 
-	// Reject malformed globs up front: matchesRepo treats a bad pattern as a
-	// non-match, which would silently drop the intended exception.
-	for i, o := range cfg.Overrides {
+const maxPolicyDepth = 5
+
+type policyFile struct {
+	Extends            string        `yaml:"extends"`
+	Branch             *string       `yaml:"branch"`
+	AllowStricterRules *bool         `yaml:"allow_stricter_rules"`
+	Rules              OverrideRules `yaml:"rules"`
+	Overrides          []Override    `yaml:"overrides"`
+}
+
+func loadPolicy(configPath string, chain []string) (Config, error) {
+	absolute, err := filepath.Abs(configPath)
+	if err != nil {
+		return Config{}, fmt.Errorf("config %q: %w", configPath, err)
+	}
+	identity, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return Config{}, fmt.Errorf("failed to read config %q: %w", absolute, err)
+	}
+	next := append(append([]string{}, chain...), identity)
+	for _, ancestor := range chain {
+		if ancestor == identity {
+			return Config{}, fmt.Errorf("policy extends cycle: %s", strings.Join(next, " -> "))
+		}
+	}
+	if len(next) > maxPolicyDepth {
+		return Config{}, fmt.Errorf("policy extends depth exceeds %d files: %s", maxPolicyDepth, strings.Join(next, " -> "))
+	}
+	data, err := os.ReadFile(absolute)
+	if err != nil {
+		return Config{}, fmt.Errorf("failed to read config %q: %w", absolute, err)
+	}
+	var policy policyFile
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	// Empty policies retain the same defaults as policies without inheritance.
+	if err := dec.Decode(&policy); err != nil && !errors.Is(err, io.EOF) {
+		return Config{}, fmt.Errorf("failed to parse config %q: %w", absolute, err)
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err == nil {
+		return Config{}, fmt.Errorf("failed to parse config %q: multiple YAML documents are unsupported", absolute)
+	} else if !errors.Is(err, io.EOF) {
+		return Config{}, fmt.Errorf("failed to parse config %q: %w", absolute, err)
+	}
+	for i, o := range policy.Overrides {
 		for _, pattern := range o.Repos {
 			if _, err := path.Match(pattern, ""); err != nil {
-				return Config{}, fmt.Errorf("invalid repo pattern %q in overrides[%d]: %w", pattern, i, err)
+				return Config{}, fmt.Errorf("config %q: invalid repo pattern %q in overrides[%d]: %w", absolute, pattern, i, err)
 			}
 		}
 	}
-
+	var cfg Config
+	if policy.Extends != "" {
+		if strings.Contains(policy.Extends, "://") {
+			return Config{}, fmt.Errorf("config %q: extends must be a local file path: %q", absolute, policy.Extends)
+		}
+		basePath := policy.Extends
+		if !filepath.IsAbs(basePath) {
+			basePath = filepath.Join(filepath.Dir(absolute), basePath)
+		}
+		cfg, err = loadPolicy(basePath, next)
+		if err != nil {
+			return Config{}, fmt.Errorf("config %q extends %q: %w", absolute, basePath, err)
+		}
+	}
+	if policy.Branch != nil {
+		cfg.Branch = *policy.Branch
+	}
+	if policy.AllowStricterRules != nil {
+		cfg.AllowStricterRules = *policy.AllowStricterRules
+	}
+	cfg.Rules = mergeOverride(cfg.Rules, policy.Rules)
+	cfg.Overrides = append(cfg.Overrides, policy.Overrides...)
 	return cfg, nil
 }
 

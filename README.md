@@ -74,6 +74,34 @@ Setting `branch: default` resolves to each repo's actual default branch (e.g., `
 
 Setting `allow_stricter_rules: true` treats repos as compliant when their protection is stricter than your config. For example, if you require 1 approval but a repo requires 2, it passes. This applies directionally per rule — more approvals, extra required checks, and disabling force pushes are all considered "stricter".
 
+### Shared base policies
+
+Use `extends` to inherit a single local policy file:
+
+```yaml
+extends: ../policies/base.yaml
+allow_stricter_rules: false
+rules:
+  required_approvals: 2
+  required_checks: []
+  restrictions: null
+```
+
+Paths resolve relative to the file containing `extends`, regardless of the working
+directory; absolute paths also work. URLs are not supported. All files use the
+same strict validation. Chains can contain at most five files, including the
+initial policy; cycles and longer chains fail with the file chain in the error.
+
+Omitted `branch`, `allow_stricter_rules`, and rule fields inherit from the base.
+Explicit child values replace them, including `false`, `0`, `required_checks: []`
+and `restrictions: null`. A restrictions block replaces the entire allowlist;
+`{}` requires an empty allowlist, while `null` disables allowlist comparison.
+An explicit empty branch selects each repository's default branch.
+
+Base overrides come first and child overrides are appended. Overrides run after
+the merged rules, so a matching base override can override a child's baseline
+rule; add a child override to replace it for those repositories.
+
 ### Per-repo overrides
 
 Use `overrides` to apply different rules to specific repos. Patterns support exact names and globs (`*`, `?`). Only specified fields are overridden; everything else inherits from the base rules. Overrides are applied in order, so later entries win for overlapping fields.
