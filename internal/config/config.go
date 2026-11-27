@@ -35,6 +35,7 @@ type OverrideRules struct {
 	RequiredApprovals              *int          `yaml:"required_approvals"`
 	DismissStaleReviews            *bool         `yaml:"dismiss_stale_reviews"`
 	RequireCodeOwnerReviews        *bool         `yaml:"require_code_owner_reviews"`
+	RequireLastPushApproval        *bool         `yaml:"require_last_push_approval"`
 	RequireStatusChecks            *bool         `yaml:"require_status_checks"`
 	StrictStatusChecks             *bool         `yaml:"strict_status_checks"`
 	RequiredChecks                 []string      `yaml:"required_checks"`
@@ -58,6 +59,7 @@ type Rules struct {
 	RequiredApprovals              int           `yaml:"required_approvals"`
 	DismissStaleReviews            bool          `yaml:"dismiss_stale_reviews"`
 	RequireCodeOwnerReviews        bool          `yaml:"require_code_owner_reviews"`
+	RequireLastPushApproval        bool          `yaml:"require_last_push_approval"`
 	RequireStatusChecks            bool          `yaml:"require_status_checks"`
 	StrictStatusChecks             bool          `yaml:"strict_status_checks"`
 	RequiredChecks                 []string      `yaml:"required_checks"`
@@ -169,6 +171,7 @@ func MergeProtective(a, b Rules) Rules {
 		RequiredApprovals:              approvals,
 		DismissStaleReviews:            a.DismissStaleReviews || b.DismissStaleReviews,
 		RequireCodeOwnerReviews:        a.RequireCodeOwnerReviews || b.RequireCodeOwnerReviews,
+		RequireLastPushApproval:        a.RequireLastPushApproval || b.RequireLastPushApproval,
 		RequireStatusChecks:            a.RequireStatusChecks || b.RequireStatusChecks,
 		StrictStatusChecks:             a.StrictStatusChecks || b.StrictStatusChecks,
 		RequiredChecks:                 checks,
@@ -255,6 +258,7 @@ func Default() Config {
 			RequiredApprovals:              1,
 			DismissStaleReviews:            true,
 			RequireCodeOwnerReviews:        false,
+			RequireLastPushApproval:        false,
 			RequireStatusChecks:            false,
 			StrictStatusChecks:             true,
 			RequiredChecks:                 []string{},
@@ -418,6 +422,9 @@ func mergeOverride(base Rules, o OverrideRules) Rules {
 	if o.RequireCodeOwnerReviews != nil {
 		base.RequireCodeOwnerReviews = *o.RequireCodeOwnerReviews
 	}
+	if o.RequireLastPushApproval != nil {
+		base.RequireLastPushApproval = *o.RequireLastPushApproval
+	}
 	if o.RequireStatusChecks != nil {
 		base.RequireStatusChecks = *o.RequireStatusChecks
 	}
@@ -488,6 +495,7 @@ func (r Rules) ToAPIPayload() map[string]interface{} {
 			"required_approving_review_count": r.RequiredApprovals,
 			"dismiss_stale_reviews":           r.DismissStaleReviews,
 			"require_code_owner_reviews":      r.RequireCodeOwnerReviews,
+			"require_last_push_approval":      r.RequireLastPushApproval,
 		}
 		payload["required_pull_request_reviews"] = reviews
 	} else {
@@ -517,6 +525,7 @@ type ProtectionResponse struct {
 		RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
 		DismissStaleReviews          bool `json:"dismiss_stale_reviews"`
 		RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
+		RequireLastPushApproval      bool `json:"require_last_push_approval"`
 	} `json:"required_pull_request_reviews"`
 	RequiredStatusChecks *struct {
 		Strict   bool     `json:"strict"`
@@ -566,6 +575,7 @@ func RulesFromResponse(resp ProtectionResponse) Rules {
 		r.RequiredApprovals = resp.RequiredPullRequestReviews.RequiredApprovingReviewCount
 		r.DismissStaleReviews = resp.RequiredPullRequestReviews.DismissStaleReviews
 		r.RequireCodeOwnerReviews = resp.RequiredPullRequestReviews.RequireCodeOwnerReviews
+		r.RequireLastPushApproval = resp.RequiredPullRequestReviews.RequireLastPushApproval
 	}
 
 	if resp.RequiredStatusChecks != nil {
@@ -631,6 +641,7 @@ func Compare(desired, actual Rules, allowStricter bool) []RuleDiff {
 			fmt.Sprintf("%d", actual.RequiredApprovals))
 		addStricterBoolDiff("dismiss_stale_reviews", desired.DismissStaleReviews, actual.DismissStaleReviews)
 		addStricterBoolDiff("require_code_owner_reviews", desired.RequireCodeOwnerReviews, actual.RequireCodeOwnerReviews)
+		addStricterBoolDiff("require_last_push_approval", desired.RequireLastPushApproval, actual.RequireLastPushApproval)
 	}
 
 	// Status checks

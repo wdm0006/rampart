@@ -180,12 +180,14 @@ func TestApplyPostWriteVerification(t *testing.T) {
 		skip         bool
 		dryRun       bool
 		restrictions bool
+		lastPush     bool
 		stricter     bool
 		want         string
 		failed       bool
 	}{
 		{name: "residual drift", want: "required_approvals: 0 → 1", failed: true},
 		{name: "verified", after: 1, want: "verified"},
+		{name: "last push approval verified", after: 1, lastPush: true, want: "verified"},
 		{name: "classic restrictions", after: 1, restrictions: true, want: "verified"},
 		{name: "read error", readError: true, want: "verification read failed: unavailable", failed: true},
 		{name: "skipped verification", skip: true, want: "verification read failed: insufficient permissions", failed: true},
@@ -199,6 +201,9 @@ func TestApplyPostWriteVerification(t *testing.T) {
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			policy := "branch: main\nrules:\n  require_pull_request: true\n  required_approvals: 1\n"
+			if tt.lastPush {
+				policy += "  require_last_push_approval: true\n"
+			}
 			if tt.restrictions {
 				policy += "  restrictions: {}\n"
 			}
@@ -228,6 +233,7 @@ func TestApplyPostWriteVerification(t *testing.T) {
 						return config.Rules{}, false, nil
 					}
 					actual.RequiredApprovals = tt.after
+					actual.RequireLastPushApproval = tt.lastPush
 					if tt.restrictions {
 						actual.Restrictions = &config.Restrictions{}
 					}
